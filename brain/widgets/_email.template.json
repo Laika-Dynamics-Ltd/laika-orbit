@@ -1,0 +1,17 @@
+{
+  "id": "email",
+  "kind": "metric",
+  "title": "Email",
+  "source": "gmail",
+  "rail": "right",
+  "order": 1,
+  "href": "https://mail.google.com",
+  "config": {
+    "staleAfterMins": 20,
+    "valueLabel": "EMAILS\\nPAST 7D",
+    "value": "—",
+    "empty": "Connect Gmail in Settings → Connections."
+  },
+  "items": [],
+  "icon": "mail"
+}

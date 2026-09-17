@@ -1,0 +1,59 @@
+/* The Mission window: Mission Control's own page, full size beside the workbench rail and under
+   the header, like History. Its look is its own; only the frame and the down state are ours. */
+#mc {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: none;
+  background: var(--n2);
+}
+#mc.on { display: block }
+.mc-win { position: absolute; inset: 0 }
+.mc-frame { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: var(--n2) }
+.mc-down { max-width: 640px; padding: 64px 40px; color: var(--dim); font: 400 14px/1.5 system-ui, -apple-system, sans-serif }
+.mc-down h2 { margin: 0 0 12px; color: var(--tx); font-size: 18px; font-weight: 600 }
+.mc-down code, .mc-down pre { font: 12.5px ui-monospace, Menlo, monospace; color: var(--tx) }
+.mc-down pre { margin: 8px 0 14px; padding: 10px 12px; border: 1px solid var(--n13); border-radius: 8px; background: var(--n6); white-space: pre-wrap }
+.mc-retry {
+  margin-top: 8px;
+  padding: 7px 14px;
+  border: 1px solid var(--n16);
+  border-radius: 8px;
+  background: var(--n6);
+  color: var(--tx);
+  font: 500 13px system-ui, -apple-system, sans-serif;
+  cursor: pointer;
+}
+.mc-retry:hover { background: var(--n10) }
+.mc-retry:focus-visible { outline: 2px solid var(--acc); outline-offset: 1px }
+body.has-wbn #mc { top: 52px; left: 56px }
+@media (max-width: 700px) { body.has-wbn #mc { left: 44px } }
+
+/* A repo's own panel, in the Build view of its Claude workspace (createMissionPane). */
+/* inside #ss, whose `#ss button { font: inherit; color: inherit }` outranks a class: each rule here
+   that sets a button's font or colour is scoped under #ss .mcp to win */
+.mcp { flex: 1; min-height: 0; display: flex; flex-direction: column }
+.mcp-bar { flex: none; display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 4px 10px 4px 14px; border-bottom: 1px solid var(--n13); color: var(--dim); font: 400 12px ui-monospace, Menlo, monospace }
+.mcp-repos { display: flex; flex: none; border: 1px solid var(--n13); border-radius: 7px; overflow: hidden }
+.mcp-repos[hidden] { display: none }
+#ss .mcp .mcp-repos button, .mcp .mcp-repos button { padding: 3px 10px; border: 0; border-left: 1px solid var(--n13); background: none; color: var(--dim); font: 500 12px ui-monospace, Menlo, monospace; cursor: pointer }
+.mcp-repos button:first-child { border-left: 0 }
+#ss .mcp .mcp-repos button:hover { color: var(--tx); background: var(--n6) }
+#ss .mcp .mcp-repos button.on { color: var(--tx); background: var(--n9) }
+.mcp-repos button:focus-visible { outline: 2px solid var(--acc); outline-offset: -2px }
+.mcp-frame[hidden] { display: none }
+.mcp-where { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.mcp-fill { flex: 1 }
+.mcp-acts { display: flex; gap: 6px; flex: none }
+#ss .mcp .mcp-btn, .mcp .mcp-btn { padding: 4px 10px; border: 1px solid var(--n16); border-radius: 7px; background: none; color: var(--tx); font: 500 12px system-ui, -apple-system, sans-serif; text-decoration: none; cursor: pointer }
+.mcp-btn:hover { background: var(--n10) }
+.mcp-btn:focus-visible, .mcp-start:focus-visible { outline: 2px solid var(--acc); outline-offset: 1px }
+.mcp-body { position: relative; flex: 1; min-height: 0 }
+.mcp-frame { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: var(--n2) }
+.mcp-off { max-width: 600px; padding: 40px 28px; color: var(--dim); font: 400 14px/1.5 system-ui, -apple-system, sans-serif }
+.mcp-off h2 { margin: 0 0 10px; color: var(--tx); font-size: 17px; font-weight: 600 }
+.mcp-off code, .mcp-err { font: 12.5px ui-monospace, Menlo, monospace; color: var(--tx) }
+#ss .mcp .mcp-start, .mcp .mcp-start { margin-top: 6px; padding: 7px 14px; border: 0; border-radius: 8px; background: var(--acc); color: var(--acc-ink); font: 600 13px system-ui, -apple-system, sans-serif; cursor: pointer }
+.mcp-start:disabled { opacity: 0.6; cursor: default }
+.mcp-err { margin: 14px 0 0; padding: 10px 12px; border: 1px solid var(--n13); border-radius: 8px; background: var(--n6); white-space: pre-wrap; color: var(--err) }
+.mcp-err[hidden] { display: none }

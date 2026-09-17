@@ -1,0 +1,8 @@
+packages:
+  - packages/*
+onlyBuiltDependencies:
+  - electron
+  # the terminal panel's native module: prebuilt for macOS and Windows, compiled on Linux
+  - node-pty
+  # vitest's bundled vite checks its esbuild binary on install
+  - esbuild

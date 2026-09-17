@@ -1,0 +1,58 @@
+name: ci
+on:
+  push: { branches: [main] }
+  pull_request:
+
+# A force-push supersedes the run already in flight. Without this the old run
+# keeps a slot and reports against a commit nobody is looking at any more.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gates:
+    # macOS is where the app is used; Linux is where most contributors' CI runs
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      # version comes from package.json's packageManager; stating it here as well makes
+      # the action refuse to run
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24, cache: pnpm }
+
+      - run: pnpm install --frozen-lockfile
+
+      # Every gate below runs even when an earlier one failed. They test
+      # different things, so stopping at the first means fixing a type error,
+      # pushing, and only then learning the tests were red as well. `!cancelled()`
+      # rather than `always()`: a superseded run should still stop dead.
+      - name: typecheck
+        run: |
+          for p in core cli mcp app; do
+            npx tsc -p "packages/$p/tsconfig.json" --noEmit
+          done
+
+      - name: test
+        if: '!cancelled()'
+        run: pnpm test
+
+      - name: lint
+        if: '!cancelled()'
+        run: npx biome check packages/core packages/cli packages/mcp packages/app/src bench tools
+
+      - name: router diagnostics
+        if: '!cancelled()'
+        run: node packages/cli/src/index.ts lint
+
+      # core is the IP and must stay dependency-free; this fails if that changes
+      - name: core has zero runtime dependencies
+        if: '!cancelled()'
+        run: |
+          deps=$(node -e "const d=require('./packages/core/package.json').dependencies||{};console.log(Object.keys(d).length)")
+          echo "core runtime deps: $deps"
+          test "$deps" = "0"

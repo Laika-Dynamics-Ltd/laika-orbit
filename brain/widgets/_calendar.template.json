@@ -1,0 +1,27 @@
+{
+  "id": "calendar",
+  "kind": "calendar",
+  "title": "Calendar",
+  "source": "google-calendar",
+  "rail": "left",
+  "order": 2,
+  "href": "https://calendar.google.com",
+  "config": {
+    "staleAfterMins": 15,
+    "zones": [
+      {
+        "label": "USA PT",
+        "tz": "America/Los_Angeles"
+      },
+      {
+        "label": "USA ET",
+        "tz": "America/New_York"
+      },
+      {
+        "label": "LONDON",
+        "tz": "Europe/London"
+      }
+    ]
+  },
+  "items": []
+}

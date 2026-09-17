@@ -1,0 +1,17 @@
+/* The Showreel window's frame. What is inside it is styled in showreel-embed.css. */
+#sr{position:fixed;inset:0;z-index:75; /* over the Claude dock (70) */
+  display:none;place-items:center;padding:22px;
+  background:color-mix(in srgb, var(--n0) 62%, transparent);backdrop-filter:blur(3px)}
+#sr.on{display:grid}
+.sr-win{position:relative;width:min(1440px,100%);height:100%;overflow:hidden;
+  border:1px solid var(--n15);border-radius:14px;background:var(--n2);
+  box-shadow:0 30px 80px -30px var(--n0),0 1px 0 rgba(var(--hl),.04) inset}
+.sr-host{position:absolute;inset:0;z-index:0}
+.sr-x{position:absolute;top:13px;right:12px;z-index:1;width:32px;height:32px;padding:0;
+  background:none;border:0;border-radius:8px;font:20px/1 ui-sans-serif,system-ui;color:var(--n24);cursor:pointer}
+.sr-x:hover{color:var(--tx);background:var(--n10)}
+.sr-missing{margin:0;padding:64px 40px;color:var(--dim);max-width:640px}
+@media (max-width:760px){#sr{padding:0}.sr-win{border-radius:0}}
+/* the workbench rail stays in view, so its Reel button can close the window it opened */
+body.has-wbn #sr{left:56px}
+@media (max-width:700px){body.has-wbn #sr{left:44px}}

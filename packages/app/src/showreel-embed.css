@@ -1,0 +1,56 @@
+/* Inside the Showreel window's shadow root, after the studio's own stylesheet. */
+
+/* the studio's palette, from the active 1brain theme (--ok and --warn inherit as they are) */
+:host {
+  --bg: var(--n2);
+  --panel: var(--n5);
+  --raised: var(--n8);
+  --sunk: var(--n1);
+  --line: var(--n13);
+  --line-strong: var(--n19);
+  --text: var(--tx);
+  --muted: var(--dim);
+  --faint: var(--dim2);
+  --accent: var(--acc);
+  --accent-ink: var(--acc-ink);
+  --accent-soft: color-mix(in srgb, var(--acc) 14%, transparent);
+  --bad: var(--err);
+  --scene: var(--info);
+  --sans: ui-sans-serif, -apple-system, "Inter", system-ui;
+}
+
+/* a window, not a page: the header and rail stay put and the main column scrolls */
+.app {
+  position: relative;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px / 1.5 var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+.top {
+  position: static;
+  flex: none;
+  padding-right: 56px; /* the window's close button */
+}
+.shell {
+  flex: 1;
+  min-height: 0;
+  grid-template-rows: minmax(0, 1fr);
+}
+.rail {
+  position: static;
+  height: auto;
+  padding-bottom: 56px;
+}
+.main {
+  max-width: none;
+  overflow: auto;
+}
+.console,
+.toasts {
+  position: absolute;
+}

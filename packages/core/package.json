@@ -1,0 +1,10 @@
+{
+  "name": "@laika/core",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "author": "Laika Dynamics Limited",
+  "type": "module",
+  "main": "src/index.ts",
+  "dependencies": {}
+}

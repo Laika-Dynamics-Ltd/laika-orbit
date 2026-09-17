@@ -1,0 +1,54 @@
+# deps & build
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+
+# extraction cache — regenerable from source documents
+.1brain/
+
+# gauntlet: keep the bar, the definition and the results; drop the working copies,
+# the per-round captures and the voided run (hundreds of MB of PNGs)
+.gauntlet/work/
+.gauntlet/void-run-1/
+.gauntlet/champion/
+
+# research: keep notes, transcripts and the cloned kit; drop the extracted frames
+research/frames/
+
+# local runtime
+*.log
+.DS_Store
+
+# generated synthetic fixture — rebuild with `node packages/graph/scripts/gen-data.mjs`
+packages/graph/public/brain.json
+
+# feed credentials (calendar iCal address, mail app password)
+.env.local
+*.json.tmp
+
+
+# personal settings (profile) — never committed
+*.local.json
+
+# showreel build output (clips, voice cache, generated HyperFrames project)
+.showreel/
+# synced widget data (email subjects and senders, event titles) — rebuilt by the feeds from
+# brain/widgets/_<id>.template.json
+brain/widgets/email.json
+brain/widgets/calendar.json
+
+# any env file except the example
+.env
+.env.*
+!.env.example
+
+# gauntlet scratch output and stray renders
+.gauntlet/work2/
+.gauntlet/champion2/
+packages/graph/undefined/
+
+# written by the app for each user; the defaults apply until then
+brain/index.config.json
+brain/widgets/_settings.json
+brain/profile.local.json

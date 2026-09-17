@@ -1,0 +1,167 @@
+/* The conductor: the chat that leads the others. Gold, crowned, and unmistakable at a glance. */
+#ss {
+  /* the theme's own gold, so every theme (light ones too) gets a conductor that fits */
+  --lead: var(--warn);
+  --lead-hi: color-mix(in srgb, var(--warn) 65%, white);
+  --lead-deep: color-mix(in srgb, var(--warn) 70%, black);
+  /* text on gold */
+  --lead-on: var(--n0);
+  --lead-ink: color-mix(in srgb, var(--lead) 70%, var(--c-text));
+}
+
+/* ------------------------------------------------------------------ the window */
+.ss-chat.conductor {
+  position: relative;
+  background:
+    radial-gradient(120% 60% at 50% -10%, color-mix(in srgb, var(--lead) 13%, transparent), transparent 70%),
+    linear-gradient(180deg, color-mix(in srgb, var(--lead) 4%, transparent), transparent 40%);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--lead) 30%, transparent);
+}
+.ss-chat.conductor::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--lead), var(--lead-hi), var(--lead), transparent);
+  z-index: 2;
+}
+.ss-chat.conductor.away::before { animation: cd-sweep 3.2s linear infinite; background-size: 200% 100% }
+@keyframes cd-sweep { from { background-position: 200% 0 } to { background-position: 0 0 } }
+
+.cd-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid color-mix(in srgb, var(--lead) 28%, var(--c-line));
+  background: color-mix(in srgb, var(--lead) 7%, transparent);
+  flex-wrap: wrap;
+}
+.cd-crown {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  border-radius: 50%;
+  font-size: 17px;
+  color: var(--lead-on);
+  background: radial-gradient(circle at 35% 30%, var(--lead-hi), var(--lead) 60%, var(--lead-deep));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--lead) 60%, transparent), 0 0 16px color-mix(in srgb, var(--lead) 45%, transparent);
+}
+.cd-what { display: flex; flex-direction: column; min-width: 0; flex: 1 1 180px }
+.cd-what b { font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--lead-ink) }
+.cd-what span { color: var(--c-text); font-size: 13.5px; font-weight: 560; white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+.cd-away { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; color: var(--c-dim) }
+.cd-away button {
+  font: inherit;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--lead) 40%, var(--c-line));
+  background: transparent;
+  color: var(--c-text);
+  cursor: pointer;
+}
+.cd-away button:hover { background: color-mix(in srgb, var(--lead) 16%, transparent) }
+.cd-away button:focus-visible { outline: 2px solid var(--lead); outline-offset: 1px }
+.cd-away.on { color: var(--lead-ink); font-weight: 560 }
+.cd-away.on button { background: var(--lead); color: var(--lead-on); border-color: var(--lead); font-weight: 600 }
+.cd-pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--lead); animation: cd-pulse 1.6s ease-out infinite }
+@keyframes cd-pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--lead) 70%, transparent) }
+  100% { box-shadow: 0 0 0 8px transparent }
+}
+
+/* ------------------------------------------------------------------ the log */
+.ss-chat.conductor .m-user { border-color: color-mix(in srgb, var(--lead) 35%, var(--c-line)) }
+.m-note.cd-tick { color: var(--lead-ink); font-style: italic }
+
+/* a message the conductor sent into another chat */
+.m-user.from-lead { border-color: color-mix(in srgb, var(--lead) 45%, var(--c-line)); background: color-mix(in srgb, var(--lead) 8%, var(--c-soft)) }
+.m-user.from-lead::before { content: '♛ From the conductor'; display: block; margin-bottom: 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; color: var(--lead-ink) }
+
+.m-suggest {
+  border: 1px solid color-mix(in srgb, var(--lead) 40%, var(--c-line));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--lead) 5%, transparent);
+  overflow: hidden;
+}
+.sg-h { padding: 8px 12px; font-size: 11px; font-weight: 650; letter-spacing: 0.1em; text-transform: uppercase; color: var(--lead-ink); border-bottom: 1px solid color-mix(in srgb, var(--lead) 22%, var(--c-line)) }
+.sg-i { padding: 10px 12px; display: grid; gap: 5px }
+.sg-i + .sg-i { border-top: 1px solid var(--c-line) }
+.sg-i.sent, .sg-i.dismissed { opacity: 0.55 }
+.sg-to { display: flex; gap: 8px; align-items: baseline; font-size: 12px; min-width: 0 }
+.sg-to b { color: var(--c-text) }
+.sg-to span { color: var(--c-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+.sg-t { color: var(--c-text); white-space: pre-wrap; font-size: 13.5px }
+.sg-why { color: var(--c-faint); font-size: 12px }
+.sg-a { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px }
+.sg-a em { font-size: 12px; color: var(--c-faint); font-style: normal }
+.sg-a button {
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 11px;
+  border-radius: 6px;
+  border: 1px solid var(--c-line);
+  background: transparent;
+  color: var(--c-text);
+  cursor: pointer;
+}
+.sg-a button:hover { background: var(--c-soft) }
+.sg-a .sg-go { background: var(--lead); border-color: var(--lead); color: var(--lead-on); font-weight: 600 }
+.sg-a .sg-go:hover { background: var(--lead-hi) }
+
+/* ------------------------------------------------------------------ every chat: what it planned next */
+.ss-next {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 14px 6px;
+  padding: 5px 6px 5px 10px;
+  border: 1px dashed var(--c-line);
+  border-radius: 8px;
+  font-size: 12.5px;
+  min-width: 0;
+}
+.ss-next[hidden] { display: none }
+.nx-k { flex: none; color: var(--c-faint); font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em }
+.nx-t { flex: 1; min-width: 0; text-align: left; font: inherit; color: var(--c-text); background: none; border: 0; padding: 2px 4px; border-radius: 4px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+.nx-t:hover { background: var(--c-soft) }
+.nx-x { flex: none; font: inherit; background: none; border: 0; color: var(--c-faint); cursor: pointer; padding: 0 6px }
+
+/* ------------------------------------------------------------------ the tab */
+#ss .ws-chat.conductor { border-color: color-mix(in srgb, var(--lead) 45%, transparent); background: color-mix(in srgb, var(--lead) 10%, transparent) }
+#ss .ws-chat.conductor .ws-t { color: var(--lead-ink); font-weight: 600 }
+#ss .ws-col.focus .ws-chat.conductor.on::after { background: var(--lead) }
+.ws-crown { color: var(--lead); font-size: 13px; line-height: 1 }
+#ss .ws-chat.conductor.away .ws-crown { animation: cd-glow 2s ease-in-out infinite }
+@keyframes cd-glow { 50% { text-shadow: 0 0 8px var(--lead) } }
+
+/* ------------------------------------------------------------------ making one */
+.ss-lead-toggle {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 10px;
+  align-items: center;
+  width: 100%;
+  margin: 4px 0 14px;
+  padding: 10px 12px;
+  text-align: left;
+  font: inherit;
+  color: var(--c-text);
+  background: transparent;
+  border: 1px dashed color-mix(in srgb, var(--lead) 45%, var(--c-line));
+  border-radius: 10px;
+  cursor: pointer;
+}
+.ss-lead-toggle span { grid-row: span 2; font-size: 20px; color: var(--lead) }
+.ss-lead-toggle b { font-size: 13px }
+.ss-lead-toggle em { font-style: normal; font-size: 12px; color: var(--c-dim) }
+.ss-lead-toggle:hover { background: color-mix(in srgb, var(--lead) 8%, transparent) }
+.ss-lead-toggle[aria-pressed='true'] { border-style: solid; background: color-mix(in srgb, var(--lead) 14%, transparent) }
+.ss-lead-toggle[aria-pressed='true'] b::after { content: ' ✓'; color: var(--lead) }
+.ss-chat.new.conductor .ss-mark { background: var(--lead) !important }
+
+@media (prefers-reduced-motion: reduce) {
+  .ss-chat.conductor.away::before, .cd-pulse, #ss .ws-chat.conductor.away .ws-crown { animation: none }
+}

@@ -1,0 +1,83 @@
+/* Live previews — ships with node-preview.ts
+   The card frame is chrome and takes the theme's ramp. Everything from "rendered text" down
+   paints the *document*: a white page with its own ink and syntax colours. That page is
+   content, not chrome, so it is deliberately fixed — the same way a PDF stays white in a dark
+   reader. Do not swap those literals for tokens. */
+
+/* ---------- in-scene cards ---------- */
+#np-layer{position:absolute;inset:0;pointer-events:none;z-index:7;overflow:hidden;
+ transition:opacity .2s}
+#np-layer.off{display:none}
+.np-card{position:absolute;left:0;top:0;width:var(--np-px,96px);pointer-events:auto;cursor:pointer;
+ border-radius:5px;background:var(--n3);border:1px solid var(--np-c,var(--n26));
+ box-shadow:0 6px 18px rgba(0,0,0,.55);overflow:hidden;opacity:0;
+ transition:opacity .22s ease,box-shadow .15s ease}
+.np-card.np-ready{opacity:.92}
+.np-card.np-none{display:none}
+.np-card.hot{opacity:1;box-shadow:0 0 0 1.5px var(--np-c,var(--n26)),0 10px 28px rgba(0,0,0,.7)}
+.np-card:hover{opacity:1}
+.np-card .np-body{position:relative;height:calc(var(--np-px,96px) * .78);overflow:hidden;background:#fff}
+.np-card .np-body[data-np="thumb"]{display:flex;align-items:center;justify-content:center;background:#e9ebf0}
+.np-card .np-body[data-np="thumb"] img{max-width:100%;max-height:100%;object-fit:contain;display:block}
+.np-card .np-body[data-np="markdown"],
+.np-card .np-body[data-np="code"]{background:#fbfbfd}
+.np-card .np-body[data-np="markdown"] > *,
+.np-card .np-body[data-np="code"] > *{transform-origin:0 0;
+ transform:scale(var(--np-k,.3));width:320px;position:absolute;left:0;top:0}
+.np-card .np-cap{display:none;padding:2px 5px;font:600 9px/14px system-ui,-apple-system,sans-serif;
+ color:var(--n32);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:var(--n3)}
+#np-layer.cap .np-cap{display:block}
+
+/* ---------- rendered text (shared by all three surfaces) ---------- */
+.np-md{padding:14px 16px;color:#1d2230;font:11.5px/1.5 ui-sans-serif,-apple-system,system-ui,sans-serif;
+ word-break:break-word}
+.np-md h1,.np-md h2,.np-md h3,.np-md h4{margin:0 0 6px;line-height:1.25;color:#0c1020}
+.np-md h1{font-size:17px}.np-md h2{font-size:14px;margin-top:10px}.np-md h3{font-size:12.5px;margin-top:8px}
+.np-md p{margin:0 0 7px}
+.np-md ul,.np-md ol{margin:0 0 7px;padding-left:18px}
+.np-md li{margin:1px 0}
+.np-md code{font:10.5px ui-monospace,Menlo,monospace;background:#eef0f5;padding:0 3px;border-radius:3px}
+.np-md pre,.np-md .ql-code{background:#f0f2f7;border-radius:4px;padding:6px 8px;margin:0 0 7px;
+ font:10px/1.45 ui-monospace,Menlo,monospace;overflow:hidden;color:#242a3a}
+.np-md .ql-code{display:flex;gap:8px}
+.np-md .ql-gut{color:#9aa3b8;text-align:right;margin:0}
+.np-md .ql-src{margin:0}
+.np-md .ql-front{background:#f0f2f7;color:#6a7288;font:10px/1.4 ui-monospace,Menlo,monospace;
+ padding:6px 8px;border-radius:4px;margin:0 0 8px;white-space:pre-wrap}
+.np-md blockquote{margin:0 0 7px;padding:2px 10px;border-left:3px solid #d5d9e4;color:#4d5568}
+.np-md table{border-collapse:collapse;font-size:10.5px;margin:0 0 7px}
+.np-md th,.np-md td{border:1px solid #dfe3ec;padding:2px 6px;text-align:left}
+.np-md a{color:#2a5bd7;text-decoration:none}
+.np-md img{max-width:100%;border-radius:3px}
+.np-md hr{border:0;border-top:1px solid #e3e6ee;margin:8px 0}
+.np-md .ql-box{display:inline-block;width:9px;height:9px;border:1px solid #9aa3b8;border-radius:2px;
+ margin-right:5px;vertical-align:-1px}
+.np-md .ql-box.on{background:#3ddc97;border-color:#3ddc97}
+.np-code{margin:0;padding:12px 14px;color:#1f2534;background:#fbfbfd;
+ font:10.5px/1.5 ui-monospace,Menlo,monospace;white-space:pre;overflow:hidden;tab-size:2}
+.np-code i{font-style:normal}
+.np-code i.k{color:#a626a4}.np-code i.s{color:#50a14f}.np-code i.n{color:#986801}
+.np-code i.c{color:#9aa0ad;font-style:italic}.np-code i.t{color:#c18401}
+
+/* ---------- tooltip ---------- */
+.np-tip{margin:8px -11px -8px;width:calc(100% + 22px);max-height:220px;overflow:hidden;position:relative;
+ background:#fff;border-top:1px solid var(--ln);animation:np-in .18s ease}
+.np-tip[data-np="thumb"]{display:flex;align-items:center;justify-content:center;background:#e9ebf0;
+ min-height:90px}
+.np-tip[data-np="thumb"] img{max-width:100%;max-height:220px;display:block;object-fit:contain}
+.np-tip[data-np="markdown"]::after,.np-tip[data-np="code"]::after{content:"";position:absolute;
+ left:0;right:0;bottom:0;height:46px;background:linear-gradient(transparent,#fbfbfd)}
+.np-tip .np-md{padding:12px 14px}
+#tip.np-up{transform:translateY(calc(-100% - 28px))}
+@keyframes np-in{from{opacity:0}to{opacity:1}}
+
+/* ---------- inspector ---------- */
+.np-ins{margin-top:10px;border-radius:8px;overflow:hidden;position:relative;cursor:zoom-in;
+ border:1px solid var(--ln);background:#fbfbfd;max-height:0;opacity:0;
+ transition:max-height .25s ease,opacity .25s ease}
+.np-ins.np-ready{max-height:260px;opacity:1}
+.np-ins:hover{border-color:var(--dim)}
+.np-ins[data-np="thumb"]{display:flex;align-items:center;justify-content:center;background:#e9ebf0}
+.np-ins[data-np="thumb"] img{max-width:100%;max-height:260px;display:block;object-fit:contain}
+.np-ins[data-np="markdown"]::after,.np-ins[data-np="code"]::after{content:"";position:absolute;
+ left:0;right:0;bottom:0;height:56px;background:linear-gradient(transparent,#fbfbfd)}

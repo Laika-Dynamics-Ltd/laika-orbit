@@ -1,0 +1,48 @@
+{
+  "id": "brainstat",
+  "kind": "metric",
+  "title": "Brain",
+  "source": "@laika/core",
+  "refreshedAt": "2026-09-16T02:48:39+00:00",
+  "rail": "left",
+  "order": 3,
+  "config": {
+    "value": "192",
+    "valueLabel": "FILES\\nINDEXED",
+    "flaggedLabel": "RETRIEVAL",
+    "segments": [
+      {
+        "label": "CURATED",
+        "n": 20,
+        "accent": "#ff7a45"
+      },
+      {
+        "label": "FOLDER",
+        "n": 155,
+        "accent": "#5b9dff"
+      }
+    ],
+    "footer": "0 MODEL TOKENS PER QUERY"
+  },
+  "items": [
+    {
+      "title": "p50 recall latency",
+      "meta": "~1ms"
+    },
+    {
+      "title": "router pointers",
+      "meta": "32"
+    },
+    {
+      "title": "golden set recall@5",
+      "meta": "100%"
+    }
+  ],
+  "icon": "brain",
+  "actions": [
+    {
+      "label": "index",
+      "action": "brain-window"
+    }
+  ]
+}

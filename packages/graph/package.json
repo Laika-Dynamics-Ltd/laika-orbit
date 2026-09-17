@@ -1,0 +1,24 @@
+{
+  "name": "@laika/graph",
+  "private": true,
+  "license": "MIT",
+  "author": "Laika Dynamics Limited",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --port 4173 --strictPort",
+    "capture": "node scripts/capture.mjs"
+  },
+  "dependencies": {
+    "three": "0.186.0",
+    "troika-three-text": "0.52.5",
+    "camera-controls": "3.1.2",
+    "postprocessing": "6.39.5"
+  },
+  "devDependencies": {
+    "vite": "8.3.0",
+    "typescript": "5.9.3",
+    "playwright": "^1.50.0"
+  }
+}

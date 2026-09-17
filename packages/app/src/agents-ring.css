@@ -1,0 +1,96 @@
+/* Live agents on the ring — ships with agents-ring.ts */
+#ag {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9; /* above the app badges, so a tooltip is never under one */
+  overflow: hidden;
+}
+#ag > .ag-m {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+/* the dot: state is colour and motion, never colour alone */
+#ag .ag-m > i {
+  position: absolute;
+  left: -6px;
+  top: -6px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--ag-c);
+  box-shadow: 0 0 10px var(--ag-c);
+}
+#ag .ag-m > i::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  border: 1.5px solid var(--ag-c);
+  opacity: 0;
+}
+#ag .needs-you { --ag-c: var(--acc) }
+#ag .blocked { --ag-c: var(--warn) }
+#ag .working { --ag-c: var(--cyan) }
+#ag .needs-you > i::after, #ag .blocked > i::after { animation: ag-ring 1.8s ease-out infinite }
+#ag .blocked > i { border-radius: 3px; transform: rotate(45deg) scale(0.85) }
+#ag .working > i { width: 8px; height: 8px; left: -4px; top: -4px; box-shadow: 0 0 6px var(--ag-c) }
+#ag .working > i::after {
+  inset: -5px;
+  opacity: 0.8;
+  border-color: var(--ag-c) transparent;
+  animation: ag-spin 1.4s linear infinite;
+}
+
+/* a short outward label for sessions that need something from you */
+#ag .ag-l {
+  position: absolute;
+  left: 13px;
+  top: -8px;
+  white-space: nowrap;
+  font: 600 10.5px/16px ui-monospace, Menlo, monospace;
+  letter-spacing: 0.02em;
+  color: var(--ag-c);
+  text-shadow: 0 0 6px var(--n0), 0 0 2px var(--n0);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#ag .ag-m.left .ag-l { left: auto; right: 13px }
+
+#ag .ag-tip {
+  display: none;
+  position: absolute;
+  left: 14px;
+  top: 12px;
+  min-width: 200px;
+  max-width: 300px;
+  background: color-mix(in srgb, var(--n2) 97%, transparent);
+  border: 1px solid var(--n19);
+  border-left: 2px solid var(--ag-c);
+  border-radius: 7px;
+  padding: 7px 10px;
+  font: 500 12px/1.4 system-ui, sans-serif;
+  z-index: 2;
+}
+#ag .ag-m.left .ag-tip { left: auto; right: 14px }
+#ag .ag-m:hover .ag-tip { display: block }
+#ag .ag-tip b { display: block; color: var(--n36) }
+#ag .ag-tip span { display: block; margin-top: 2px; color: var(--n29); font: 400 10.5px ui-monospace, Menlo, monospace }
+#ag .ag-tip em { display: block; margin-top: 4px; color: var(--n24); font: 400 10px system-ui, sans-serif; font-style: normal }
+
+@keyframes ag-ring {
+  0% { opacity: 0.9; transform: scale(0.6) }
+  100% { opacity: 0; transform: scale(1.9) }
+}
+@keyframes ag-spin { to { transform: rotate(360deg) } }
+@media (prefers-reduced-motion: reduce) {
+  #ag .ag-m > i::after { animation: none }
+  #ag .needs-you > i::after, #ag .blocked > i::after { opacity: 0.7 }
+}
+
+/* the session open in the dock */
+#ag .ag-m.focus > i { outline: 2px solid var(--n35); outline-offset: 3px }

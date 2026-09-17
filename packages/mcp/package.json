@@ -1,0 +1,13 @@
+{
+  "name": "@laika/mcp",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "author": "Laika Dynamics Limited",
+  "type": "module",
+  "dependencies": {
+    "@laika/core": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^4.6.5"
+  }
+}

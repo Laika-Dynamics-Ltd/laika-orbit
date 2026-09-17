@@ -1,0 +1,30 @@
+{
+  "id": "routines",
+  "kind": "table",
+  "title": "Routines",
+  "source": "cron + agents",
+  "rail": "right",
+  "order": 3,
+  "config": {
+    "meta": "examples: edit brain/widgets/routines.json",
+    "columns": [
+      "TIME",
+      "ROUTINE",
+      "STATUS"
+    ]
+  },
+  "items": [
+    {
+      "title": "index rebuild",
+      "meta": "09:00",
+      "tag": "NEXT",
+      "badge": "local"
+    },
+    {
+      "title": "calibrate proposal",
+      "meta": "18:00",
+      "tag": "QUEUED",
+      "badge": "claude"
+    }
+  ]
+}

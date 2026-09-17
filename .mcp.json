@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "1brain": {
+      "command": "node",
+      "args": ["packages/mcp/src/index.ts"],
+      "env": { "BRAIN_ROOT": "." }
+    }
+  }
+}

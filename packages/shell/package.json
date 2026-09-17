@@ -1,0 +1,20 @@
+{
+  "name": "@laika/shell",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "author": "Laika Dynamics Limited",
+  "type": "module",
+  "description": "Chromium shell for laika-1brain: the dashboard as a desktop window, with a multi-profile browser inside it",
+  "main": "main.mjs",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "44.4.1"
+  },
+  "dependencies": {
+    "electron-chrome-extensions": "4.9.0",
+    "electron-chrome-web-store": "0.13.0"
+  }
+}

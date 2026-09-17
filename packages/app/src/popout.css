@@ -1,0 +1,17 @@
+/* Pop-outs (popout.ts): the buttons in the main window, and the page a pop-out window loads. */
+
+#ctl-drawer .c-popout,
+.ctl .c-popin { display: inline-flex; align-items: center; padding: 4px 9px }
+
+/* ---------------------------------------------------------- pop-out window */
+/* the window has no title bar: the part's own header is the handle, clear of the traffic lights */
+body.pop-win { background: var(--n2) }
+body.pop-win #ss { top: 0 }
+body.pop-win #ss .ss-bar { height: 46px; padding-left: 80px; -webkit-app-region: drag }
+body.pop-win #ss .ss-bar :is(button, input, a) { -webkit-app-region: no-drag }
+body.pop-win #ss:not(.dock) .ss-pane { width: 100% }
+body.pop-win :is(.ss-grip, .ss-launch) { display: none }
+
+body.pop-win .ctl { height: 100vh; overflow: auto }
+body.pop-win .ctl .c-top { padding-left: 88px; -webkit-app-region: drag }
+body.pop-win .ctl .c-top :is(button, a, input, select) { -webkit-app-region: no-drag }

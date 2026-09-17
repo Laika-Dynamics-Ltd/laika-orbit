@@ -1,0 +1,31 @@
+{
+  "name": "laika-1brain",
+  "private": true,
+  "license": "MIT",
+  "author": "Laika Dynamics Limited",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "type": "module",
+  "packageManager": "pnpm@10.33.0",
+  "scripts": {
+    "typecheck": "for p in core cli mcp app; do npx tsc -p packages/$p/tsconfig.json --noEmit || exit 1; done",
+    "test": "vitest run",
+    "test:e2e": "node packages/app/test/e2e/run.mjs",
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "bench": "node bench/scoring.bench.mjs",
+    "brain": "node packages/cli/src/index.ts",
+    "shell": "node packages/shell/start.mjs",
+    "shell:app": "node packages/shell/make-app.mjs",
+    "shell:stable": "node packages/shell/make-stable.mjs"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.13",
+    "@types/node": "22.20.3",
+    "@types/three": "^0.186.0",
+    "playwright": "^1.63.0",
+    "typescript": "5.9.3",
+    "vitest": "^3.2.4"
+  }
+}

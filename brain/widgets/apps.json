@@ -1,0 +1,22 @@
+{
+  "id": "apps",
+  "kind": "applist",
+  "title": "Micro Apps",
+  "source": "local",
+  "rail": "left",
+  "order": 1,
+  "items": [
+    {
+      "title": "Laika Orbit",
+      "meta": "Your whole workspace as a living map",
+      "href": "http://localhost:5200",
+      "icon": "brain"
+    },
+    {
+      "title": "Showreel Studio",
+      "meta": "Narrated product films, from one config file",
+      "action": "showreel",
+      "icon": "play"
+    }
+  ]
+}

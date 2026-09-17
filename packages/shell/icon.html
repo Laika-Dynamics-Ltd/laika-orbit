@@ -1,0 +1,59 @@
+<!doctype html>
+<!-- The app icon, in the app's own vocabulary: the orange brand mark inside the ARMS rings,
+     on the map's near-black. Rendered at 1024px by render-icon.mjs, then turned into an
+     .icns by make-app.mjs. macOS supplies the rounded-square mask, so the tile is drawn
+     square with the standard 18% inset in mind. -->
+<meta charset="utf-8" />
+<style>
+  html, body { margin: 0; width: 1024px; height: 1024px; background: transparent; overflow: hidden }
+  svg { display: block }
+</style>
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- macOS Big Sur tile: rounded square, radius ≈ 22.4% of the side -->
+    <clipPath id="tile"><rect x="100" y="100" width="824" height="824" rx="185" /></clipPath>
+    <radialGradient id="bg" cx="50%" cy="42%" r="70%">
+      <stop offset="0" stop-color="#151a2b" />
+      <stop offset=".55" stop-color="#0a0c14" />
+      <stop offset="1" stop-color="#05060a" />
+    </radialGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#ff7a45" stop-opacity=".55" />
+      <stop offset=".45" stop-color="#ff7a45" stop-opacity=".14" />
+      <stop offset="1" stop-color="#ff7a45" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="mark" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffa070" />
+      <stop offset="1" stop-color="#ff6a30" />
+    </linearGradient>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="6" />
+    </filter>
+  </defs>
+  <g clip-path="url(#tile)">
+    <rect width="1024" height="1024" fill="url(#bg)" />
+    <!-- the rings: skills, memory, routines, applications -->
+    <g fill="none" stroke-linecap="round">
+      <circle cx="512" cy="512" r="150" stroke="#ff7a45" stroke-opacity=".28" stroke-width="3" />
+      <circle cx="512" cy="512" r="232" stroke="#c07bff" stroke-opacity=".22" stroke-width="3" stroke-dasharray="6 14" />
+      <circle cx="512" cy="512" r="300" stroke="#ffc94f" stroke-opacity=".22" stroke-width="3" />
+      <circle cx="512" cy="512" r="358" stroke="#5b9dff" stroke-opacity=".28" stroke-width="4" stroke-dasharray="70 26" />
+      <!-- a few memory nodes on their band -->
+      <g fill="#c07bff" fill-opacity=".8" stroke="none">
+        <circle cx="512" cy="280" r="7" /><circle cx="713" cy="396" r="6" /><circle cx="713" cy="628" r="7" />
+        <circle cx="512" cy="744" r="6" /><circle cx="311" cy="628" r="7" /><circle cx="311" cy="396" r="6" />
+      </g>
+      <g fill="#5b9dff" fill-opacity=".9" stroke="none">
+        <circle cx="512" cy="154" r="9" /><circle cx="822" cy="333" r="8" /><circle cx="822" cy="691" r="9" />
+        <circle cx="512" cy="870" r="8" /><circle cx="202" cy="691" r="9" /><circle cx="202" cy="333" r="8" />
+      </g>
+    </g>
+    <!-- the mark: the brand hexagon, lit -->
+    <circle cx="512" cy="512" r="260" fill="url(#glow)" />
+    <polygon points="512,392 616,452 616,572 512,632 408,572 408,452" fill="#ff7a45" fill-opacity=".55" filter="url(#soft)" />
+    <polygon points="512,392 616,452 616,572 512,632 408,572 408,452" fill="url(#mark)" />
+    <polygon points="512,420 592,466 592,558 512,604 432,558 432,466" fill="none" stroke="#1a0d06" stroke-opacity=".55" stroke-width="3" />
+    <!-- tile edge highlight -->
+    <rect x="102" y="102" width="820" height="820" rx="183" fill="none" stroke="#ffffff" stroke-opacity=".06" stroke-width="3" />
+  </g>
+</svg>

@@ -1,0 +1,62 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Laika Orbit</title>
+<!-- Sets the theme before the first paint, so a chosen theme never flashes Midnight first. -->
+<script>try{var t=localStorage.getItem('1brain:theme');if(t&&t!=='midnight')document.documentElement.dataset.theme=t}catch(e){}</script>
+<link rel="stylesheet" href="/src/themes.css"/><link rel="stylesheet" href="/src/style.css"/></head>
+<body>
+<header>
+  <div class="brand"><span class="brand-mark"></span><h1>laika<b>·orbit</b></h1></div>
+  
+  <form id="qf">
+    <span class="qicon">⌕</span>
+    <input id="q" placeholder="ask the brain" autocomplete="off"/>
+    <kbd class="qkbd">⌘K</kbd>
+    <button>recall</button>
+  </form>
+  <nav id="tools">
+    <div class="tool"><button class="tool-btn" type="button" aria-expanded="false"><span>layout</span><b id="tool-layout">ARMS</b><i>▾</i></button>
+      <div class="tool-pop"><div id="legend"></div></div></div>
+    <div class="tool"><button class="tool-btn" type="button" aria-expanded="false"><span>telemetry</span><b id="tool-fps">--</b><i>▾</i></button>
+      <div class="tool-pop" id="tele-pop"></div></div>
+    <button class="tool-btn icon" id="tool-home" type="button" title="Reset view (0)" aria-label="Reset view">⌂</button>
+    <div class="tool" id="tool-keys"><button class="tool-btn icon" type="button" aria-expanded="false" title="Shortcuts (?)">?</button>
+      <div class="tool-pop right keys">
+        <div class="lt">search</div>
+        <div><kbd>⌘</kbd><kbd>K</kbd><span>spotlight: files, actions, ask</span></div>
+        <div><kbd>/</kbd><span>spotlight</span></div>
+        <div><kbd>space</kbd><span>Quick Look the selected file</span></div>
+        <div><kbd>↑</kbd><kbd>↓</kbd><span>move through results</span></div>
+        <div><kbd>↵</kbd><span>open result</span></div>
+        <div><kbd>esc</kbd><span>close panel or menu</span></div>
+        <div class="lt">view</div>
+        <div><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd><span>ARMS · Rings · Packed</span></div>
+        <div><kbd>[</kbd><span>toggle left column</span></div>
+        <div><kbd>]</kbd><span>toggle right column</span></div>
+        <div><kbd>\</kbd><span>graph only</span></div>
+        <div><kbd>i</kbd><span>index settings</span></div>
+        <div><kbd>⌘</kbd><kbd>,</kbd><span>settings</span></div>
+        <div><kbd>c</kbd><span>agent control</span></div>
+        <div><kbd>h</kbd><span>history: what happened, across every agent and repo</span></div>
+        <div><kbd>b</kbd><span>browser (tabs, one profile per account)</span></div>
+        <div><kbd>J</kbd><span>toggle JARVIS layer</span></div>
+        <div><kbd>p</kbd><span>toggle node previews</span></div>
+        <div class="lt">graph</div>
+        <div><kbd>drag</kbd><span>pan</span></div>
+        <div><kbd>⌥</kbd><kbd>drag</kbd><span>orbit (or right / middle button)</span></div>
+        <div><kbd>scroll</kbd><span>zoom to the pointer</span></div>
+        <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><span>fly (hold ⇧ for speed)</span></div>
+        <div><kbd>Q</kbd><kbd>E</kbd><span>orbit · <kbd>↑</kbd><kbd>↓</kbd> tilt</span></div>
+        <div><kbd>+</kbd><kbd>-</kbd><span>zoom</span></div>
+        <div><kbd>0</kbd><span>reset view</span></div>
+        <div><kbd>f</kbd><span>frame the selected node</span></div>
+        <div><kbd>click</kbd><span>open a node · double-click flies to it</span></div>
+        <div><kbd>s</kbd><span>sessions (tap)</span></div>
+      </div></div>
+  </nav>
+  <div class="status" id="hdr"></div>
+  <button id="settings-btn" class="hdr-gear" type="button" title="Settings (⌘,)" aria-label="Settings"><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M9.4 1.1l.3 1.6c.4.1.8.3 1.1.5l1.4-.9 1.5 1.5-.9 1.4c.2.3.4.7.5 1.1l1.6.3v2.2l-1.6.3c-.1.4-.3.8-.5 1.1l.9 1.4-1.5 1.5-1.4-.9c-.3.2-.7.4-1.1.5l-.3 1.6H7.2l-.3-1.6c-.4-.1-.8-.3-1.1-.5l-1.4.9-1.5-1.5.9-1.4c-.2-.3-.4-.7-.5-1.1l-1.6-.3V6.9l1.6-.3c.1-.4.3-.8.5-1.1l-.9-1.4 1.5-1.5 1.4.9c.3-.2.7-.4 1.1-.5l.3-1.6h2.2zM8.3 5.6a2.4 2.4 0 100 4.8 2.4 2.4 0 000-4.8z"/></svg></button>
+</header>
+<main><aside id="rail-l" class="rail"></aside><div id="stage"><div id="apps"></div><div id="hubs"></div><div id="inspector"></div><button class="rail-tab" data-rail="0" title="Toggle left column ([)"></button><button class="rail-tab" data-rail="1" title="Toggle right column (])"></button><a id="ver" class="ver" href="/api/version" target="_blank" rel="noopener" hidden></a></div><aside id="rail-r" class="rail"></aside>
+<aside id="panel"><button class="p-close" type="button" title="Close (esc)">×</button><div id="panel-body"></div></aside></main>
+<script type="module" src="/src/main.ts"></script></body></html>

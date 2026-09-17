@@ -1,0 +1,28 @@
+{
+  "id": "skills",
+  "kind": "deck",
+  "title": "Skills Deck",
+  "source": ".claude/skills",
+  "rail": "right",
+  "order": 2,
+  "config": {
+    "meta": "tap ▸ to run"
+  },
+  "items": [
+    {
+      "title": "/calibrate",
+      "meta": "OPUS · HIGH",
+      "tag": "brain"
+    },
+    {
+      "title": "/code-review",
+      "meta": "OPUS · HIGH",
+      "tag": "repo"
+    },
+    {
+      "title": "/simplify",
+      "meta": "SONNET · MEDIUM",
+      "tag": "repo"
+    }
+  ]
+}

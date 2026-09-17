@@ -1,0 +1,144 @@
+/* Spotlight — ships with spotlight.ts */
+/* macOS-Spotlight placement: fixed to the window, centred, its top anchored in the upper
+   third so the input never moves while the results grow downward. No real dimming — the
+   desktop isn't darkened — just enough scrim to catch an outside click. */
+#sp {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: none;
+  background: color-mix(in srgb, var(--n0) 8%, transparent);
+}
+#sp.on { display: block }
+#sp .sp-panel {
+  position: absolute;
+  left: 50%;
+  top: 24vh;
+  transform: translateX(-50%);
+  width: min(680px, calc(100vw - 32px));
+  background: color-mix(in srgb, var(--n6) 72%, transparent);
+  backdrop-filter: blur(28px) saturate(1.6);
+  -webkit-backdrop-filter: blur(28px) saturate(1.6);
+  border: 1px solid rgba(var(--hl),0.12);
+  border-radius: 14px;
+  box-shadow: 0 32px 90px -20px rgba(0, 0, 0, 0.75), 0 8px 24px -12px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+  animation: sp-in 0.12s cubic-bezier(0.2, 0.9, 0.2, 1);
+}
+#sp .sp-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 56px;
+  padding: 0 16px;
+}
+#sp .sp-list:not(:empty) { border-top: 1px solid rgba(var(--hl),0.08) }
+#sp .sp-ico { color: var(--n30); font-size: 22px; line-height: 1 }
+#sp input {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: 0;
+  outline: 0;
+  color: var(--n36);
+  font: 300 23px/1.2 system-ui, -apple-system, sans-serif;
+  letter-spacing: -0.01em;
+}
+#sp input::placeholder { color: var(--n24) }
+#sp kbd {
+  font: 600 9.5px ui-monospace, Menlo, monospace;
+  color: var(--n27);
+  border: 1px solid var(--n19);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 1px 5px;
+  background: var(--n9);
+}
+#sp .sp-list {
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 5px 6px 7px;
+}
+#sp .sp-sec {
+  font: 700 8.5px ui-monospace, Menlo, monospace;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--n23);
+  padding: 9px 10px 4px;
+}
+#sp .sp-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  min-width: 0;
+}
+/* selected row: a solid highlight, as on macOS */
+#sp .sp-row.on { background: var(--cyan-bd) }
+#sp .sp-row.on .sp-t { color: var(--n37) }
+#sp .sp-row.on mark { color: var(--cyan-pale) }
+#sp .sp-dot {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  line-height: 1;
+}
+#sp .sp-dot.ask { width: 14px; height: 14px; color: var(--acc); background: none }
+#sp .sp-dot.cmd { width: 14px; height: 14px; color: var(--cyan); background: none; font-size: 15px }
+#sp .sp-dot.app { width: 14px; height: 14px; color: var(--info-lt); background: none }
+#sp .sp-dot.app.off { opacity: 0.4 }
+#sp .sp-t {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--n34);
+  font: 500 13px/1.3 system-ui, -apple-system, sans-serif;
+}
+#sp .sp-t b { color: var(--n37); font-weight: 600 }
+#sp .sp-r {
+  flex: 0 1 46%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl; /* long paths keep their END, which is the informative part */
+  text-align: right;
+  color: var(--n25);
+  font: 400 10.5px ui-monospace, Menlo, monospace;
+}
+#sp .sp-row.on .sp-r { color: var(--n33) }
+#sp mark { background: none; color: var(--cyan); font-weight: 700 }
+#sp .sp-empty { padding: 18px; color: var(--n25); font: 400 13px system-ui, sans-serif; text-align: center }
+#sp .sp-foot {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  padding: 8px 14px;
+  border-top: 1px solid var(--n14);
+  color: var(--n24);
+  font: 500 10.5px system-ui, sans-serif;
+}
+#sp .sp-foot kbd { margin-right: 2px }
+#sp .sp-count { margin-left: auto; font-family: ui-monospace, Menlo, monospace }
+
+@keyframes sp-in {
+  from { opacity: 0; transform: translateX(-50%) scale(0.97) }
+  to { opacity: 1; transform: translateX(-50%) scale(1) }
+}
+@media (prefers-reduced-motion: reduce) {
+  #sp .sp-panel { animation: none }
+}
+@media (max-width: 520px) {
+  #sp .sp-panel { top: 16px }
+  #sp input { font-size: 18px }
+  #sp .sp-r { display: none }
+  #sp .sp-foot span:not(.sp-count) { display: none }
+}

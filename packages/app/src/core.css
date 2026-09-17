@@ -1,0 +1,93 @@
+/* Centrepiece — kept beside core.ts so it ships with it */
+#core {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  z-index: 6;
+  font: 600 9px/1.3 ui-monospace, Menlo, monospace;
+  letter-spacing: 0.12em;
+  transition: opacity 0.2s;
+}
+#core.quiet { opacity: 0.35 }
+
+/* root badge: dark disc, orange rim, pixel mark */
+#core .core-badge {
+  position: absolute;
+  left: -17px;
+  top: -17px;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: radial-gradient(circle at 50% 38%, var(--acc-bg), var(--acc-bg) 72%);
+  box-shadow:
+    0 0 0 1.5px var(--acc),
+    0 0 0 4px color-mix(in srgb, var(--acc-bg) 85%, transparent),
+    0 0 18px color-mix(in srgb, var(--acc) 45%, transparent);
+}
+#core .core-badge svg { width: 19px; height: 19px; fill: var(--acc-lt) }
+#core .core-badge.pulse { animation: core-pulse 0.9s cubic-bezier(0.2, 0.8, 0.2, 1) }
+
+/* the question's tokens leave the core */
+#core .core-burst i {
+  position: absolute;
+  left: 0;
+  top: 0;
+  font-style: normal;
+  color: var(--cyan-lt);
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--info-bg) 80%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--cyan) 45%, transparent);
+  white-space: nowrap;
+  opacity: 0;
+  transform: translate(-50%, -50%) rotate(var(--a)) translateX(0) rotate(calc(-1 * var(--a)));
+}
+#core .core-burst.go i {
+  animation: core-token 1.15s cubic-bezier(0.15, 0.7, 0.25, 1) var(--d) forwards;
+}
+
+/* readout under the root label */
+#core .core-read {
+  position: absolute;
+  left: 0;
+  top: 38px;
+  font-size: 8.5px;
+  letter-spacing: 0.06em;
+  line-height: 1.2;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  white-space: nowrap;
+  text-shadow: 0 1px 3px #000;
+}
+#core .core-read b { color: var(--acc-lt); font-weight: 700 }
+#core .core-read span { color: color-mix(in srgb, var(--cyan-lt) 70%, transparent); font-weight: 400 }
+#core .core-read.flash b { animation: core-flash 0.6s ease-out }
+
+@keyframes core-pulse {
+  0% { box-shadow: 0 0 0 1.5px var(--acc), 0 0 0 4px color-mix(in srgb, var(--acc-bg) 85%, transparent), 0 0 18px color-mix(in srgb, var(--acc) 45%, transparent) }
+  30% { box-shadow: 0 0 0 1.5px var(--acc-pale), 0 0 0 10px color-mix(in srgb, var(--acc) 25%, transparent), 0 0 40px color-mix(in srgb, var(--acc) 90%, transparent) }
+  100% { box-shadow: 0 0 0 1.5px var(--acc), 0 0 0 4px color-mix(in srgb, var(--acc-bg) 85%, transparent), 0 0 18px color-mix(in srgb, var(--acc) 45%, transparent) }
+}
+@keyframes core-token {
+  0% { opacity: 0; transform: translate(-50%, -50%) rotate(var(--a)) translateX(8px) rotate(calc(-1 * var(--a))) }
+  20% { opacity: 1 }
+  80% { opacity: 0.9 }
+  100% { opacity: 0; transform: translate(-50%, -50%) rotate(var(--a)) translateX(78px) rotate(calc(-1 * var(--a))) }
+}
+@keyframes core-flash {
+  0% { color: var(--n37); text-shadow: 0 0 12px var(--acc) }
+  100% { color: var(--acc-lt) }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #core .core-badge.pulse, #core .core-read.flash b { animation: none }
+  #core .core-burst.go i { animation: none; opacity: 0 }
+}

@@ -1,0 +1,89 @@
+/* Routines dial — ships with routines-ring.ts */
+#rt {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 6;
+  overflow: hidden;
+}
+#rt > * {
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+
+/* marker: hollow gold circle, bright centre dot, the ring line visible through it */
+#rt .rt-m { pointer-events: auto; cursor: default }
+#rt .rt-m > i {
+  position: absolute;
+  left: -8px;
+  top: -8px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1.4px solid var(--warn);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--warn) 35%, transparent);
+}
+#rt .rt-m > i::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 5px;
+  height: 5px;
+  margin: -2.5px 0 0 -2.5px;
+  border-radius: 50%;
+  background: var(--warn-lt);
+}
+/* state follows the job */
+#rt .rt-m.fired > i { opacity: 0.4; box-shadow: none }
+#rt .rt-m.next > i {
+  border-color: var(--acc);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--acc) 80%, transparent);
+  animation: rt-pulse 1.8s ease-in-out infinite;
+}
+#rt .rt-m.next > i::after { background: var(--acc-lt) }
+#rt .rt-m.failed > i, #rt .rt-m.error > i { border-color: var(--err) }
+
+#rt .rt-tip {
+  display: none;
+  position: absolute;
+  left: 12px;
+  top: -10px;
+  white-space: nowrap;
+  background: color-mix(in srgb, var(--n2) 96%, transparent);
+  border: 1px solid var(--n19);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font: 500 10.5px/1.35 system-ui, sans-serif;
+  z-index: 2;
+}
+#rt .rt-m:hover .rt-tip { display: block }
+#rt .rt-tip b { display: block; color: var(--n36) }
+#rt .rt-tip span { display: block; color: var(--n29); font: 400 9.5px ui-monospace, Menlo, monospace }
+
+#rt .rt-h {
+  font: 600 8.5px ui-monospace, Menlo, monospace;
+  letter-spacing: 0.08em;
+  color: color-mix(in srgb, var(--warn) 55%, transparent);
+  font-style: normal;
+  translate: -50% -50%;
+}
+
+/* the time now: a short cyan hand across the ring */
+#rt .rt-now > i {
+  position: absolute;
+  left: -1px;
+  top: -9px;
+  width: 2px;
+  height: 18px;
+  border-radius: 1px;
+  background: var(--cyan);
+  box-shadow: 0 0 8px var(--cyan);
+  transform: rotate(var(--r, 0deg));
+}
+
+@keyframes rt-pulse { 50% { box-shadow: 0 0 20px color-mix(in srgb, var(--acc) 100%, transparent); transform: scale(1.12) } }
+@media (prefers-reduced-motion: reduce) {
+  #rt .rt-m.next > i { animation: none }
+}

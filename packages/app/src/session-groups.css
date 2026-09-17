@@ -1,0 +1,550 @@
+/* Claude workspaces as VS Code editor groups — ships with sessions.ts. Each group is a column
+   with its own tab bar over the chat it shows; the groups sit side by side with draggable
+   dividers. Colours come from #ss's --c-* tokens and the repo's --ws. */
+
+.ws { --ws: var(--n27); position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; border-top: 2px solid var(--ws) }
+.ws-files, .ws-changes, .ws-build { flex: 1; min-height: 0; display: flex; flex-direction: column }
+.ws-changes > .sc { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 14px 20px }
+
+/* ------------------------------------------------------------ groups */
+.ws-cols { position: relative; flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) }
+.ws-col { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column }
+.ws-cols.split .ws-col + .ws-col { border-left: 1px solid var(--c-line) }
+.ws-gbody { flex: 1; min-height: 0; display: flex; flex-direction: column }
+.ws-cols.split .ws-col:not(.focus) .ws-gbody { opacity: 0.82; transition: opacity 0.15s }
+.ws-cols.split .ws-col:not(.focus):hover .ws-gbody { opacity: 0.94 }
+.ws-cols.split .ss-log { padding-inline: 12px }
+.ws-cols.split .cx, .ws-cols.split .ss-tasks { margin-inline: 10px }
+.ws-cols.split .ss-tips { grid-template-columns: 1fr }
+.ws-cols.resizing { cursor: col-resize; user-select: none }
+.ws-cols.resizing .ws-col { pointer-events: none }
+
+/* a group's tab bar: its tabs, then its own actions */
+.ws-gbar { flex: none; display: flex; align-items: center; gap: 2px; height: 38px; padding: 0 4px 0 2px; border-bottom: 1px solid var(--c-line); background: var(--n2); container: gbar / inline-size }
+.ws-col.focus .ws-gbar { background: var(--n4) }
+.ws-gfill { flex: 1; align-self: stretch }
+
+/* tabs shrink first, then scroll, with soft edges where more tabs hide */
+.ws-strip { position: relative; flex: 0 1 auto; min-width: 0; height: 100%; display: flex; align-items: center }
+.ws-chats { display: flex; align-items: center; gap: 2px; min-width: 0; height: 100%; padding: 0 4px; overflow-x: auto; scrollbar-width: none; scroll-behavior: smooth }
+.ws-chats::-webkit-scrollbar { display: none }
+.ws-strip.l .ws-chats { mask-image: linear-gradient(90deg, transparent, black 28px) }
+.ws-strip.r .ws-chats { mask-image: linear-gradient(90deg, black calc(100% - 28px), transparent) }
+.ws-strip.l.r .ws-chats { mask-image: linear-gradient(90deg, transparent, black 28px, black calc(100% - 28px), transparent) }
+
+#ss .ws-chat {
+  position: relative;
+  flex: 0 1 200px;
+  min-width: 124px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: none;
+  color: var(--c-dim);
+  font-size: 12.5px;
+  white-space: nowrap;
+  transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s;
+}
+#ss .ws-chat:hover { color: var(--c-text); background: var(--c-soft) }
+/* the tab a group shows: quiet in a group you are not in, lit in the one you are */
+#ss .ws-chat.on { color: var(--n31); background: var(--n7); border-color: var(--n16) }
+#ss .ws-col.focus .ws-chat.on { color: var(--c-text); background: color-mix(in srgb, var(--ws) 11%, var(--n7)); border-color: color-mix(in srgb, var(--ws) 42%, transparent) }
+#ss .ws-col.focus .ws-chat.on::after { content: ''; position: absolute; left: 10px; right: 10px; bottom: -6px; height: 2px; border-radius: 2px; background: var(--ws) }
+#ss .ws-chat.st-waiting { color: var(--c-turn) }
+#ss .ws-chat.st-unread .ws-t { color: var(--c-text); font-weight: 600 }
+#ss .ws-chat.draft .ws-t { font-style: italic }
+.ws-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; text-align: left }
+#ss .ws-chat b { flex: none; width: 18px; height: 18px; margin-right: -6px; display: none; place-items: center; border-radius: 5px; font-weight: 400; font-size: 14px; color: var(--c-faint) }
+#ss .ws-chat:hover b, #ss .ws-chat.on b { display: grid }
+#ss .ws-chat b:hover { background: var(--n18); color: var(--c-text) }
+
+/* live status, the same everywhere a chat is listed */
+.ws-st { flex: none; position: relative; width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--n23); background: transparent; font-style: normal }
+.st-running > .ws-st, .ws-st.st-running, .st-starting > .ws-st, .ws-st.st-starting { width: 10px; height: 10px; border: 1.6px solid color-mix(in srgb, var(--ws, var(--c-run)) 25%, transparent); border-top-color: var(--ws, var(--c-run)); animation: ss-spin 0.8s linear infinite }
+.st-waiting > .ws-st, .ws-st.st-waiting { border: 0; background: var(--c-turn); animation: ws-need 1.6s ease-out infinite }
+.st-unread > .ws-st, .ws-st.st-unread { border: 0; background: var(--c-ok); box-shadow: 0 0 6px color-mix(in srgb, var(--c-ok) 60%, transparent) }
+.st-idle > .ws-st, .ws-st.st-idle { border-color: color-mix(in srgb, var(--ws, var(--n27)) 70%, transparent) }
+.st-error > .ws-st, .ws-st.st-error { border: 0; background: var(--c-no) }
+.st-draft > .ws-st { border-style: dashed; border-color: var(--c-faint) }
+@keyframes ws-need { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--acc) 55%, transparent) } 70%, 100% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--acc) 0%, transparent) } }
+
+/* group actions */
+#ss .ws-btn { flex: none; display: inline-flex; align-items: center; justify-content: center; height: 28px; min-width: 28px; padding: 0 6px; border: 1px solid transparent; border-radius: 7px; background: none; color: var(--c-faint) }
+#ss .ws-btn:hover { background: var(--c-soft); color: var(--c-text) }
+#ss .ws-btn:disabled { opacity: 0.35; cursor: default; background: none }
+#ss .ws-new:hover { color: var(--ws) }
+#ss .ws-col:not(.focus) .ws-btn:not(.ws-new) { opacity: 0; transition: opacity 0.12s }
+#ss .ws-col:not(.focus) .ws-gbar:hover .ws-btn:not(.ws-new) { opacity: 1 }
+@container gbar (max-width: 330px) {
+  #ss .ws-chat { min-width: 96px }
+  #ss [data-gact='split'] { display: none }
+}
+
+/* dragging a tab */
+#ss .ws-chat.lifted { opacity: 0.35 }
+#ss .ws-chat.drop-before::before, #ss .ws-chat.drop-after::before { content: ''; position: absolute; top: 3px; bottom: 3px; width: 2px; border-radius: 2px; background: var(--ws); box-shadow: 0 0 8px var(--ws) }
+#ss .ws-chat.drop-before::before { left: -2px }
+#ss .ws-chat.drop-after::before { right: -2px }
+.ws.dragging .ws-chat b { display: none !important }
+.ws-drop { position: absolute; z-index: 5; display: grid; place-items: center; border: 1.5px dashed color-mix(in srgb, var(--ws) 70%, transparent); border-radius: 10px; background: color-mix(in srgb, var(--ws) 8%, color-mix(in srgb, var(--n1) 50%, transparent)); pointer-events: none; transition: left 0.12s, width 0.12s }
+.ws-drop span { padding: 6px 12px; border: 1px solid var(--c-line); border-radius: 999px; background: var(--n5); color: var(--c-text); font-size: 12.5px; font-weight: 600 }
+.ws-drop.side { border-style: solid; background: color-mix(in srgb, var(--ws) 15%, color-mix(in srgb, var(--n1) 55%, transparent)) }
+
+.ws-rename { position: absolute; top: 50%; z-index: 3; height: 28px; margin-top: -14px; padding: 0 9px; border: 1px solid var(--ws); border-radius: 7px; background: var(--n5); color: var(--c-text); font: 500 12.5px ui-sans-serif, -apple-system, system-ui, sans-serif; box-shadow: 0 0 0 3px color-mix(in srgb, var(--ws) 22%, transparent), 0 10px 30px rgba(0, 0, 0, 0.5); outline: none }
+
+/* dividers */
+.ws-rz { position: absolute; top: 0; bottom: 0; z-index: 4; width: 8px; cursor: col-resize; touch-action: none }
+.ws-rz::after { content: ''; position: absolute; top: 0; bottom: 0; left: 3.5px; width: 1px; background: transparent; transition: background-color 0.12s, box-shadow 0.12s }
+.ws-rz:hover::after, .ws-rz.drag::after { left: 3px; width: 2px; background: var(--ws); box-shadow: 0 0 10px color-mix(in srgb, var(--ws) 60%, transparent) }
+
+/* ------------------------------------------------------------ the workspace's views, in the header */
+.ss-views { flex: none; display: inline-flex; align-items: center; gap: 4px }
+.ws-seg { flex: none; display: inline-flex; padding: 2px; border: 1px solid var(--c-line); border-radius: 8px }
+#ss .ws-seg button { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px; border: 0; border-radius: 6px; background: none; color: var(--c-dim); font-size: 12px }
+#ss .ws-seg button:hover { color: var(--c-text) }
+#ss .ws-seg button.on { background: var(--n12); color: var(--c-text) }
+#ss .ws-seg button.on svg { color: var(--ws) }
+#ss .ws-seg b { color: var(--warn); font-weight: 600 }
+#ss .ws-seg b:empty { display: none }
+#ss .ss-views .ss-ic.on { color: var(--ws) }
+.ss-vsep { width: 1px; height: 18px; margin: 0 4px; background: var(--c-line) }
+#ss.dock:not(.wide) .ws-seg button span { display: none }
+#ss.dock:not(.wide) .ws-seg button { padding: 0 7px }
+
+/* ------------------------------------------------------------ menus */
+#ss .pop-i i.ws-st { margin-top: 5px; border-radius: 50%; background-color: transparent }
+#ss .pop-i i.ws-st.st-waiting { background: var(--c-turn) }
+#ss .pop-i i.ws-st.st-unread { background: var(--c-ok) }
+#ss .pop-i i.ws-st.st-error { background: var(--c-no) }
+#ss .pop-i.chat.on { box-shadow: inset 2px 0 0 var(--ws, var(--c-turn)) }
+#ss .pop-i.act { align-items: center }
+#ss .pop-i.act:disabled { opacity: 0.45; cursor: default; background: none }
+#ss .pop-i .pop-ic { flex: 0 0 18px; display: grid; place-items: center; color: var(--c-dim); font-size: 15px }
+#ss .pop-i kbd { flex: none; margin-left: auto }
+.pop-sep { height: 1px; margin: 4px 8px; background: var(--c-line) }
+.pop-empty { margin: 6px 12px 10px; color: var(--c-faint); font-size: 12.5px }
+
+/* the group menu: the folder's chats by where they are, then the layout */
+.ss-pop.gmenu { width: min(360px, calc(100vw - 16px)); max-height: min(600px, calc(100vh - 120px)) }
+.ss-pop.gmenu .pop-q { margin: 8px 8px 0; width: auto }
+.ss-pop.gmenu .pop-list { padding: 0 }
+.gm-head { display: flex; align-items: baseline; gap: 10px; padding: 11px 14px 6px }
+.gm-head > b { flex: none; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 650; color: var(--c-text) }
+.gm-tally { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 10px; margin-left: auto; font-size: 11.5px; color: var(--c-faint) }
+.gm-tally span::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-right: 5px; border-radius: 50%; background: var(--c-faint); vertical-align: 1px }
+.gm-tally .gm-need { color: var(--c-turn) }
+.gm-tally .gm-need::before { background: var(--c-turn) }
+.gm-tally .gm-busy { color: var(--c-dim) }
+.gm-tally .gm-busy::before { background: var(--ws, var(--c-run)) }
+.gm-tally .gm-done::before { background: var(--c-ok) }
+.gm-sec { display: flex; align-items: center; gap: 7px; padding: 10px 14px 4px; font-size: 10.5px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: var(--c-faint) }
+.gm-sec[hidden] { display: none }
+.gm-glyph { flex: none }
+.gm-glyph rect { fill: none; stroke: var(--c-faint); stroke-width: 1 }
+.gm-glyph rect.lit { fill: var(--ws, var(--c-turn)); stroke: var(--ws, var(--c-turn)) }
+#ss .gm-row { position: relative; margin: 0 4px; width: calc(100% - 8px); padding: 7px 10px; cursor: pointer; outline: none }
+#ss .gm-row[hidden] { display: none }
+#ss .gm-row:focus-visible, #ss .gm-row:focus { background: var(--c-soft) }
+#ss .gm-row.on { box-shadow: inset 2px 0 0 var(--ws, var(--c-turn)) }
+#ss .gm-row[data-st='waiting'] b { color: var(--c-turn) }
+#ss .gm-row small.gm-on { flex: none; align-self: center; padding: 1px 6px; border: 1px solid var(--c-line); border-radius: 999px; font-size: 10.5px; color: var(--c-dim) }
+.gm-acts { flex: none !important; display: none; align-self: center; gap: 2px }
+#ss .gm-row:is(:hover, :focus, :focus-within) .gm-acts { display: flex }
+#ss .gm-row:is(:hover, :focus, :focus-within) small.gm-on { display: none }
+#ss .gm-x { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 5px; background: none; color: var(--c-dim); font-size: 15px; line-height: 1 }
+#ss .gm-x:hover { background: var(--n12); color: var(--c-text) }
+#ss .gm-x.end:hover { color: var(--c-no) }
+.gm-foot { position: sticky; bottom: 0; margin-top: 8px; border-top: 1px solid var(--c-line); background: var(--n5) }
+.gm-tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 8px 8px 4px }
+#ss .gm-tile { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 8px 4px 6px; border: 1px solid var(--c-line); border-radius: 8px; background: var(--n2); color: var(--c-text) }
+#ss .gm-tile:hover:not(:disabled), #ss .gm-tile:focus-visible { border-color: color-mix(in srgb, var(--ws, var(--c-turn)) 60%, var(--c-line)); background: var(--c-soft) }
+#ss .gm-tile:disabled { opacity: 0.4; cursor: default }
+.gm-tile .gm-ti { display: grid; place-items: center; height: 16px; color: var(--c-dim) }
+#ss .gm-tile:hover:not(:disabled) .gm-ti { color: var(--ws, var(--c-turn)) }
+.gm-tile b { font-size: 12px; font-weight: 600 }
+.gm-tile kbd { min-height: 15px; font-size: 10px; color: var(--c-faint) }
+.gm-tile kbd.none { visibility: hidden }
+.gm-links { display: flex; align-items: center; gap: 2px; padding: 2px 8px 8px }
+#ss .gm-links button { display: inline-flex; align-items: center; gap: 6px; padding: 5px 8px; border: 0; border-radius: 6px; background: none; color: var(--c-dim); font-size: 12px }
+#ss .gm-links button:hover, #ss .gm-links button:focus-visible { background: var(--c-soft); color: var(--c-text) }
+.gm-keys { margin-left: auto; display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: var(--c-faint) }
+.gm-keys kbd { font-size: 10px }
+
+.ws-cmenu { min-width: 250px }
+.ws-cmenu .cm-h { display: flex; align-items: center; gap: 8px; max-width: 300px; padding: 7px 10px 6px; color: var(--n27); font: 600 12px ui-sans-serif, -apple-system, system-ui, sans-serif }
+.ws-cmenu .cm-h span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.ws-cmenu button { display: flex !important; align-items: center; gap: 12px }
+.ws-cmenu button span { flex: 1 }
+.ws-cmenu kbd { font: 500 10.5px ui-monospace, Menlo, monospace; color: var(--n24) }
+.ws-cmenu button.danger { color: var(--err-lt) }
+.ws-cmenu hr { height: 1px; margin: 4px 6px; border: 0; background: var(--n14) }
+
+/* scrolled up to read: a way back to the latest message */
+#ss .ss-latest { position: absolute; left: 50%; bottom: 128px; z-index: 3; display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 11px 0 8px; transform: translateX(-50%); border: 1px solid var(--c-line); border-radius: 999px; background: var(--n7); color: var(--c-text); font-size: 12px; font-weight: 600; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45) }
+#ss .ss-latest:hover { border-color: color-mix(in srgb, var(--ws, var(--c-turn)) 60%, transparent) }
+#ss .ss-latest svg { color: var(--ws, var(--c-turn)) }
+.ss-chat { position: relative }
+
+/* ------------------------------------------------------------ project folders */
+#ss .ws-tab.project > i { border-radius: 50%; box-shadow: inset 0 0 0 2px color-mix(in srgb, black 35%, var(--ws)) }
+.ws-repo.project i { border-radius: 50% }
+.ws-rp { flex: none; margin-right: 6px; padding: 1px 5px; border-radius: 4px; background: color-mix(in srgb, var(--ws) 14%, transparent); color: color-mix(in srgb, var(--ws) 80%, var(--n34)); font: 600 10.5px/1.4 ui-monospace, Menlo, monospace; font-style: normal }
+#ss .cx-chip.where { color: var(--c-text); border-color: color-mix(in srgb, var(--ws) 45%, var(--c-line)) }
+.sc-project { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 14px 20px }
+.sc-project > .sc-repo + .sc-repo { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--c-line) }
+.sc-repo > h4 { display: flex; align-items: baseline; gap: 8px; margin: 4px 0 8px; font-size: 13px; font-weight: 600; color: var(--c-text) }
+.sc-repo > h4 i { width: 8px; height: 8px; align-self: center; border-radius: 2px; background: var(--ws) }
+.sc-repo > h4 small { color: var(--c-faint); font-weight: 400; font-size: 12px }
+.sc-project .sc { padding: 0 }
+
+/* ------------------------------------------------------------ reading room in Claude's replies */
+#ss .m-claude { line-height: 1.8 }
+#ss .m-claude .ss-md p { margin: 0 0 1em }
+#ss .m-claude .ss-md > p + p { margin-top: 0 }
+#ss .m-claude .ss-md ul, #ss .m-claude .ss-md ol { margin: 0.2em 0 1em }
+#ss .m-claude .ss-md li { margin: 0.4em 0 }
+#ss .m-claude .ss-md h1, #ss .m-claude .ss-md h2, #ss .m-claude .ss-md h3, #ss .m-claude .ss-md h4 { margin: 1.2em 0 0.45em; line-height: 1.4 }
+
+/* ------------------------------------------------------------ easy on the eyes */
+/* Replies read like a page: a comfortable size, lines that stop before the eye loses its place,
+   and prose a step softer than pure white so it doesn't glow on the dark ground. Bold keeps full
+   strength, so emphasis still lands. Colours come from the theme tokens, so light themes follow. */
+#ss .m-claude {
+  font-size: 15px;
+  letter-spacing: 0.003em;
+  color: color-mix(in srgb, var(--c-text) 86%, var(--c-dim));
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  font-kerning: normal;
+}
+#ss .m-claude .ss-md :is(p, ul, ol, blockquote, h1, h2, h3, h4) { max-width: 72ch }
+#ss .m-claude .ss-md strong { color: var(--c-text) }
+#ss .m-claude .ss-md :is(h1, h2, h3, h4) { color: var(--c-text); font-size: 1.02em }
+/* inline code: a quiet chip in the text's own colour, not a bright accent every few words */
+#ss .m-claude .ss-md :not(pre) > code {
+  padding: 0.05em 0.35em;
+  border: 0;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--c-text) 8%, transparent);
+  color: color-mix(in srgb, var(--c-text) 92%, var(--c-dim));
+  font-size: 0.86em;
+}
+/* the reply's side rule: present, not a glowing stripe */
+#ss .m-claude::before { opacity: 0.45 }
+#ss .m-claude.live::before { opacity: 0.8 }
+
+/* ------------------------------------------------------------ sliding repo tabs */
+#ss .ws-tabs.sliding .ws-tab { transition: transform 0.16s ease }
+#ss .ws-tabs.sliding .ws-tab.lifted { z-index: 2; transition: none; cursor: grabbing; background: color-mix(in srgb, var(--ws) 16%, var(--c-soft)); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45) }
+#ss .ws-tabs.sliding { cursor: grabbing }
+
+/* ------------------------------------------------------------ accounts and colours per chat */
+.ws-ac { flex: none; width: 15px; height: 15px; display: grid; place-items: center; border-radius: 50%; background: color-mix(in srgb, var(--ac) 22%, transparent); color: var(--ac); font: 700 9px/1 ui-sans-serif, -apple-system, system-ui, sans-serif; font-style: normal }
+#ss .acct-chip { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: var(--c-dim) }
+#ss .m-switch { display: block; padding: 6px 2px; color: var(--c-dim) }
+#ss .m-switch::before { display: none }
+#ss .m-switch .ss-link:disabled { opacity: .5; cursor: progress }
+#ss .pop-i:disabled { opacity: .45; cursor: not-allowed }
+#ss .acct-chip i { width: 7px; height: 7px; border-radius: 50%; background: var(--ac) }
+#ss .ws-chat.tinted:not(.on) { box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--ws) 55%, transparent) }
+#ss .ws-col.tinted .ws-gbar { box-shadow: inset 0 2px 0 var(--ws) }
+.ws-cmenu .cm-colours { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 10px 8px }
+.ws-cmenu .cm-colours button { width: 18px !important; height: 18px; padding: 0 !important; border-radius: 50% !important; background: var(--sw) !important; box-shadow: inset 0 0 0 1px rgba(var(--hl),0.15) }
+.ws-cmenu .cm-colours button:first-child { background: conic-gradient(var(--sw) 0 50%, transparent 0) !important; box-shadow: inset 0 0 0 1.5px var(--sw) }
+.ws-cmenu .cm-colours button.on { box-shadow: 0 0 0 2px var(--n4), 0 0 0 3.5px var(--n34) }
+.ws-cmenu .cm-colours button:hover { transform: scale(1.12) }
+
+/* ------------------------------------------------------------ opening a long chat */
+/* while its history replays, the log is skipped by layout entirely; it appears once, at the end */
+#ss .ss-chat.replaying .ss-log { content-visibility: hidden }
+#ss .ss-chat.replaying::after { content: 'Loading conversation…'; position: absolute; top: 38%; left: 0; right: 0; text-align: center; color: var(--c-faint); font-size: 13px; pointer-events: none }
+/* messages scrolled out of view are not laid out or painted: a long chat costs what is on screen */
+#ss .ss-log > :not(.m-working) { content-visibility: auto; contain-intrinsic-size: auto 90px }
+/* a project chat's repo tag stays short, so the chat's own title keeps the room */
+.ws-rp { max-width: 7.5em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: -0.25em; display: inline-block }
+/* in a tab the chat's name leads; the repo tag after it gives up its room first */
+#ss .ws-chat:has(.ws-rp) { flex-basis: 270px; container: wstab / inline-size }
+.ws-chat .ws-rp { margin: 0; flex: none }
+/* too narrow for both: the name keeps the room, the repo is in the tooltip */
+@container wstab (max-width: 215px) { .ws-chat .ws-rp { display: none } }
+#ss .acct-chip { max-width: 11em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+
+/* ------------------------------------------------------------ plan usage in the top bar */
+.cu { display: flex; align-items: center; gap: 6px; margin-left: auto; margin-right: 10px }
+.cu[hidden] { display: none }
+.cu-a { display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 9px 0 8px; border: 1px solid var(--n13); border-radius: 8px; background: none; color: var(--n27); font: 500 11px/1 ui-sans-serif, -apple-system, system-ui, sans-serif; cursor: pointer }
+.cu-a:hover { border-color: color-mix(in srgb, var(--ac) 55%, var(--n13)); color: var(--n34) }
+.cu-a > b { position: relative; padding-left: 11px; font-weight: 600; color: var(--n34) }
+.cu-a > b::before { content: ''; position: absolute; left: 0; top: 50%; width: 6px; height: 6px; margin-top: -3px; border-radius: 50%; background: var(--ac) }
+.cu-rows { display: grid; gap: 3px }
+.cu-row { display: grid; grid-template-columns: 15px 34px 24px; align-items: center; gap: 5px }
+.cu-row em { font-style: normal; font-size: 9.5px; letter-spacing: 0.04em; color: var(--n24) }
+.cu-row small { font: 600 9.5px/1 ui-monospace, Menlo, monospace; text-align: right; color: var(--n27) }
+.cu-bar { height: 4px; border-radius: 4px; background: color-mix(in srgb, var(--ac) 16%, transparent); overflow: hidden }
+.cu-bar i { display: block; height: 100%; border-radius: 4px; background: var(--ac) }
+.cu-row.warm .cu-bar i { background: var(--warn) }
+.cu-row.warm small { color: var(--warn) }
+.cu-row.hot .cu-bar i { background: var(--err) }
+.cu-row.hot small { color: var(--err) }
+.cu-a.hot { border-color: color-mix(in srgb, var(--err) 45%, var(--n13)) }
+@media (max-width: 1400px) { .cu-a > b { display: none } }
+/* the card under a meter: every window, when it resets, and the pace it is being used at */
+.cu-card { position: fixed; z-index: 1000; width: 300px; max-width: calc(100vw - 16px); padding: 12px 14px 10px; border: 1px solid var(--n18); border-radius: 10px; background: var(--n7); color: var(--n30); font: 12px/1.35 ui-sans-serif, -apple-system, system-ui, sans-serif; box-shadow: 0 12px 32px hsla(var(--shadow), 0.35); animation: cu-in 0.12s ease }
+.cu-card[hidden] { display: none }
+@keyframes cu-in { from { opacity: 0; transform: translateY(-3px) } }
+.cu-ch { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; min-width: 0 }
+.cu-ch i { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--ac) }
+.cu-ch b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--n37) }
+.cu-ch span { flex: none; padding: 2px 7px; border-radius: 999px; background: color-mix(in srgb, var(--ac) 18%, transparent); color: color-mix(in srgb, var(--ac) 70%, var(--n37)); font-size: 10.5px; font-weight: 600; text-transform: capitalize }
+.cu-w { padding: 8px 0; border-top: 1px solid var(--n13) }
+.cu-wh { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 5px; color: var(--n34) }
+.cu-wh b { font: 600 12px/1.35 ui-monospace, Menlo, monospace; color: var(--n37) }
+.cu-wbar { position: relative; height: 6px; border-radius: 6px; background: color-mix(in srgb, var(--ac) 16%, transparent) }
+.cu-wbar i { display: block; height: 100%; border-radius: 6px; background: var(--ac) }
+.cu-wbar u { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; border-radius: 1px; background: var(--n30); opacity: 0.55 }
+.cu-wf { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 10px; margin-top: 5px; font-size: 11px; color: var(--n24) }
+.cu-wf em { font-style: normal; color: var(--n27) }
+.cu-wf em.warm { color: var(--warn) }
+.cu-wf em.hot { color: var(--err) }
+.cu-w.warm .cu-wbar i { background: var(--warn) }
+.cu-w.warm .cu-wh b { color: var(--warn) }
+.cu-w.hot .cu-wbar i { background: var(--err) }
+.cu-w.hot .cu-wh b { color: var(--err) }
+.cu-lock { margin-top: 4px; font-size: 11px; color: var(--err) }
+.cu-x { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; padding: 8px 0; border-top: 1px solid var(--n13); color: var(--n34) }
+.cu-x b { font-weight: 600; color: var(--n37) }
+.cu-x small { grid-column: 1 / -1; font-size: 11px; color: var(--n24) }
+.cu-x.hot b, .cu-x.hot small { color: var(--err) }
+.cu-cf { display: flex; justify-content: space-between; gap: 8px; padding-top: 8px; border-top: 1px solid var(--n13); font-size: 10.5px; color: var(--n24) }
+header .cu + .status { margin-left: 0 }
+
+/* ------------------------------------------------------------ the track beside a chat */
+/* the track: a rail of points down the chat's left edge; hovered or docked, a panel of what the chat is for and every prompt in it */
+/* sized by the chat's width (cqi), not the 18px rail the panel sits in */
+#ss .ss-chat { container: chat / inline-size; --trw: clamp(190px, 36cqi, 270px) }
+#ss .ss-chat.has-track .ss-log { padding-left: 30px }
+#ss .ss-chat.has-track.track-docked .ss-log { padding-left: calc(var(--trw) + 14px) }
+#ss .ss-track { position: absolute; left: 6px; z-index: 4; width: 18px; pointer-events: none }
+#ss .tr-rail { position: absolute; inset: 0 }
+#ss .tr-rail::before { content: ''; position: absolute; left: 8px; top: 4px; bottom: 4px; width: 2px; border-radius: 2px; background: color-mix(in srgb, var(--ws, var(--n27)) 16%, transparent) }
+#ss .ss-chat.track-docked .tr-rail { display: none }
+#ss .tr-pt { position: absolute; left: 0; width: 18px; height: 14px; margin-top: -7px; padding: 0; border: 0; background: none; pointer-events: auto; cursor: pointer }
+#ss .tr-pt i { position: absolute; left: 5px; top: 3px; width: 8px; height: 8px; border-radius: 50%; background: var(--n2); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--ws, var(--n27)) 60%, var(--n23)); transition: transform 0.12s, background-color 0.12s }
+#ss .tr-pt.s-done i { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--c-ok) 70%, var(--n23)) }
+#ss .tr-pt.s-partial i { box-shadow: inset 0 0 0 1.5px var(--warn) }
+#ss .tr-pt.s-blocked i { box-shadow: inset 0 0 0 1.5px var(--err) }
+#ss .tr-pt.s-open i, #ss .tr-pt.s-wait i { background: var(--ws, var(--n27)); animation: tr-pulse 1.6s ease-in-out infinite }
+#ss .tr-pt:hover i { transform: scale(1.35); background: var(--ws, var(--n27)) }
+#ss .tr-pt.here i { background: var(--ws, var(--n27)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ws, var(--n27)) 25%, transparent) }
+#ss .tr-pt.pin i { left: 3px; top: 1px; width: 12px; height: 12px; border-radius: 3px; transform: rotate(45deg); background: var(--warn); box-shadow: 0 0 8px color-mix(in srgb, var(--warn) 45%, transparent) }
+#ss .tr-pt.pin:hover i { transform: rotate(45deg) scale(1.2) }
+#ss .tr-pt span { position: absolute; left: 22px; top: -2px; max-width: 150px; padding: 2px 7px; border-radius: 6px; background: var(--n11); border: 1px solid var(--n18); color: var(--warn-lt); font-size: 11px; line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: 0; transform: translateX(-4px); transition: opacity 0.12s, transform 0.12s; pointer-events: none }
+#ss .tr-rail:hover .tr-pt.pin span { opacity: 1; transform: none }
+#ss .tr-pt.ring i { width: 12px; height: 12px; left: 3px; top: 1px; background: conic-gradient(var(--c-ok) calc(var(--p) * 1%), color-mix(in srgb, var(--ws, var(--n27)) 25%, var(--n2)) 0); box-shadow: 0 0 0 2px var(--n2) }
+@keyframes tr-pulse { 50% { opacity: 0.45 } }
+/* the panel */
+#ss .tr-panel { position: absolute; top: 0; bottom: 0; left: -6px; width: var(--trw); display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--c-line); background: color-mix(in srgb, var(--n3) 97%, transparent); box-shadow: 12px 0 28px -18px var(--n0); pointer-events: auto; opacity: 0; visibility: hidden; transform: translateX(-8px); transition: opacity 0.14s, transform 0.14s, visibility 0s 0.14s }
+#ss .ss-track.open .tr-panel, #ss .ss-chat.track-docked .tr-panel { opacity: 1; visibility: visible; transform: none; transition: opacity 0.14s, transform 0.14s }
+#ss .ss-chat.track-docked .tr-panel { box-shadow: none; background: var(--n2) }
+#ss .tr-brief { position: relative; flex: none; padding: 12px 34px 10px 14px; border-bottom: 1px solid var(--c-line); display: flex; flex-direction: column; gap: 8px }
+#ss .tr-brief b { display: block; margin-bottom: 1px; color: var(--c-faint); font-size: 10px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase }
+#ss .tr-brief p { margin: 0; color: var(--c-text); font-size: 12.5px; line-height: 1.4 }
+#ss .tr-goal p { font-size: 13.5px; font-weight: 600; line-height: 1.35; color: color-mix(in srgb, var(--ws, var(--n27)) 22%, var(--c-text)) }
+#ss .tr-goal.guess p { font-weight: 500; color: var(--c-faint) }
+#ss .tr-goal small { display: block; margin-top: 4px; color: var(--c-faint); font-size: 11px; line-height: 1.35 }
+#ss .tr-next p { color: var(--c-faint) }
+#ss .tr-dock { position: absolute; top: 8px; right: 6px; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--c-faint); font-size: 14px; cursor: pointer }
+#ss .tr-dock:hover { background: var(--c-soft); color: var(--c-text) }
+#ss .tr-list { flex: 1; min-height: 0; margin: 0; padding: 8px 6px 14px; list-style: none; overflow-y: auto; overscroll-behavior: contain }
+#ss .tr-list li { position: relative }
+/* the line joining the nodes */
+#ss .tr-list li:not(:last-child)::before { content: ''; position: absolute; left: 14px; top: 20px; bottom: -6px; width: 2px; background: color-mix(in srgb, var(--ws, var(--n27)) 16%, transparent) }
+#ss .tr-n { position: relative; display: grid; grid-template-columns: 16px 1fr; column-gap: 8px; width: 100%; padding: 6px 8px 7px 4px; border: 0; border-radius: 8px; background: none; color: inherit; text-align: left; cursor: pointer }
+#ss .tr-n:hover { background: var(--c-soft) }
+#ss .tr-n.here { background: color-mix(in srgb, var(--ws, var(--n27)) 13%, transparent) }
+#ss .tr-st { grid-row: span 3; justify-self: center; width: 10px; height: 10px; margin-top: 4px; border-radius: 50%; background: var(--n2); box-shadow: inset 0 0 0 2px var(--n23) }
+#ss .tr-n.s-done .tr-st { background: var(--c-ok); box-shadow: none }
+#ss .tr-n.s-partial .tr-st { background: conic-gradient(var(--warn) 50%, var(--n2) 0); box-shadow: inset 0 0 0 1.5px var(--warn) }
+#ss .tr-n.s-blocked .tr-st { background: var(--err); box-shadow: none }
+#ss .tr-n.s-open .tr-st, #ss .tr-n.s-wait .tr-st { background: var(--ws, var(--n27)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ws, var(--n27)) 25%, transparent); animation: tr-pulse 1.6s ease-in-out infinite }
+#ss .tr-n.pin .tr-st { border-radius: 2px; transform: rotate(45deg) scale(0.9) }
+#ss .tr-l { color: var(--c-text); font-size: 12.5px; font-weight: 500; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden }
+#ss .tr-l.guess { color: color-mix(in srgb, var(--c-text) 75%, var(--c-faint)); font-weight: 400 }
+#ss .tr-m { margin-top: 1px; color: var(--c-faint); font-size: 11px; line-height: 1.35 }
+#ss .tr-m em { font-style: normal }
+#ss .tr-n.s-partial .tr-m em { color: var(--warn) }
+#ss .tr-n.s-blocked .tr-m em { color: var(--err) }
+#ss .tr-n.s-wait .tr-m em, #ss .tr-n.s-open .tr-m em { color: var(--ws, var(--c-text)) }
+#ss .tr-pin { margin-top: 3px; color: var(--warn-lt); font-size: 11px; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+/* a narrow chat (a small window, three or four columns) cannot give up a docked panel's width: it opens on hover instead */
+@container chat (max-width: 560px) {
+  #ss .ss-chat.has-track.track-docked .ss-log { padding-left: 30px }
+  #ss .ss-chat.track-docked .tr-rail { display: block }
+  #ss .ss-chat.track-docked .tr-panel { opacity: 0; visibility: hidden; transform: translateX(-8px); box-shadow: 12px 0 28px -18px var(--n0); background: color-mix(in srgb, var(--n3) 94%, transparent) }
+  #ss .ss-chat.track-docked .ss-track.open .tr-panel { opacity: 1; visibility: visible; transform: none }
+}
+/* pins on your messages */
+#ss .m-user { position: relative }
+#ss .m-pin { position: absolute; top: 5px; right: 6px; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--c-faint); font-size: 13px; opacity: 0; transition: opacity 0.12s }
+#ss .m-user:hover .m-pin { opacity: 1 }
+#ss .m-pin:hover { background: var(--c-soft); color: var(--warn) }
+#ss .m-user.pinned { border-color: color-mix(in srgb, var(--warn) 35%, var(--c-line)) }
+#ss .m-user.pinned .m-pin { display: none }
+#ss .m-pin-note { display: inline-block; margin: 0 0 6px; padding: 1px 8px; border: 0; border-radius: 999px; background: color-mix(in srgb, var(--warn) 12%, transparent); color: var(--warn-lt); font-size: 11.5px; font-weight: 600 }
+
+/* ------------------------------------------------------------ sub-agents */
+#ss .m-agent { border: 1px solid color-mix(in srgb, var(--ws, var(--n27)) 30%, var(--c-line)); border-radius: 10px; background: color-mix(in srgb, var(--ws, var(--n27)) 5%, transparent) }
+#ss .m-agent-h { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 12px 4px; border: 0; background: none; color: var(--c-text); font-size: 13px; text-align: left }
+#ss .m-agent-h b { flex: none; padding: 1px 7px; border-radius: 5px; background: color-mix(in srgb, var(--ws, var(--n27)) 18%, transparent); color: color-mix(in srgb, var(--ws, var(--n27)) 80%, var(--n34)); font: 600 11px ui-monospace, Menlo, monospace }
+#ss .m-agent-h span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600 }
+#ss .m-agent-h em { flex: none; font-style: normal; font-size: 11.5px; color: var(--c-faint) }
+#ss .ag-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; border: 1.6px solid color-mix(in srgb, var(--ws, var(--cyan)) 25%, transparent); border-top-color: var(--ws, var(--cyan)) }
+#ss .m-agent.running .ag-dot { animation: ss-spin 0.8s linear infinite }
+#ss .m-agent.done .ag-dot { border: 0; background: var(--c-ok) }
+#ss .m-agent.failed .ag-dot { border: 0; background: var(--c-no) }
+#ss .ag-caret { flex: none; font-style: normal; font-size: 10px; color: var(--c-faint); transition: transform 0.12s }
+#ss .m-agent.open .ag-caret { transform: rotate(90deg) }
+#ss .m-agent-now { padding: 0 12px 8px 30px; color: var(--c-dim); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+#ss .m-agent-now:empty { display: none }
+#ss .m-agent-b { display: none; padding: 0 12px 10px 30px; border-top: 1px solid var(--c-line) }
+#ss .m-agent.open .m-agent-b { display: block }
+#ss .m-agent-brief { margin: 8px 0 4px; font-size: 12.5px; color: var(--c-dim) }
+#ss .m-agent-brief summary { cursor: pointer; color: var(--c-faint) }
+#ss .m-agent-steps { display: flex; flex-direction: column; gap: 2px; margin-top: 6px }
+#ss .m-agent-steps .m-tool.sub { margin-left: 0; opacity: 1 }
+#ss .m-agent-out { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--c-line); font-size: 13.5px }
+#ss .m-agent-lbl { margin-bottom: 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--c-faint) }
+
+/* ------------------------------------------------------------ two workspaces side by side */
+#ss .ss-pane.duo { flex-direction: row; width: 100% !important; max-width: none }
+#ss .ss-pane.duo > .ws { min-width: 0 }
+#ss .ss-pane.duo > .ws { flex: 1 1 0 }
+#ss .ss-pane.duo > .ws:not(.ws-active) { border-top-color: color-mix(in srgb, var(--ws) 45%, transparent) }
+#ss .ss-pane.duo > .ws:not(.ws-active) .ws-gbody { opacity: 0.86 }
+/* spread across the screen, each folder says which it is */
+#ss .ss-pane.duo > .ws::before { content: attr(data-name); flex: none; padding: 4px 12px; overflow: hidden; border-bottom: 1px solid var(--c-line); background: color-mix(in srgb, var(--ws) 12%, transparent); color: var(--ws); font: 600 11.5px/16px ui-sans-serif, -apple-system, system-ui, sans-serif; letter-spacing: 0.02em; white-space: nowrap; text-overflow: ellipsis }
+#ss .ss-pane.duo > .ws:not(.ws-active)::before { background: color-mix(in srgb, var(--ws) 6%, transparent); color: color-mix(in srgb, var(--ws) 65%, var(--c-dim)) }
+.ws-duo-grip { position: relative; flex: none; width: 6px; cursor: col-resize; touch-action: none; background: var(--c-line) }
+.ws-duo-grip::after { content: ''; position: absolute; inset: 0 2px; border-radius: 2px; transition: background-color 0.12s }
+.ws-duo-grip:hover::after, .ws-duo-grip.drag::after { background: var(--c-turn) }
+#ss .ss-pane.sizing { cursor: col-resize; user-select: none }
+#ss .ss-pane.sizing > .ws { pointer-events: none }
+/* the repo tab that is on screen beside the active one */
+#ss .ws-tab.beside { color: var(--c-text) }
+#ss .ws-tab.beside::after { background: color-mix(in srgb, var(--ws) 50%, transparent) }
+/* dragging a repo tab down into the panel */
+#ss .ss-pane.drop-beside::after { content: 'Open beside'; position: absolute; top: 8px; right: 8px; bottom: 8px; width: calc(50% - 12px); z-index: 20; display: grid; place-items: center; border: 1.5px dashed var(--c-turn); border-radius: 12px; background: color-mix(in srgb, var(--acc) 8%, transparent); color: var(--c-text); font-size: 13px; font-weight: 600; pointer-events: none }
+#ss .ws-tab.to-beside { opacity: 0.6 }
+
+/* ------------------------------------------------------------ chat output: answer first */
+/* Claude narrating its work between steps reads a step quieter than its answer to you */
+#ss .m-claude.between { font-size: 14px; color: var(--c-dim) }
+#ss .m-claude.between .ss-md strong { color: color-mix(in srgb, var(--c-text) 80%, var(--c-dim)) }
+#ss .m-claude.between::before { display: none }
+/* one line on the left, not two: with the track there, the reply's side rule steps aside */
+#ss .ss-chat.has-track .m-claude::before { display: none }
+/* steps: compact one-liners, a hover to see there is more, the body only when opened */
+#ss .m-tool-h { padding: 2px 4px; border-radius: 6px }
+#ss .m-tool:not(.flat) .m-tool-h:hover { background: var(--c-soft) }
+#ss .m-tool.open { margin: 2px 0 6px }
+#ss .m-tool.failed .m-tool-h b { color: var(--c-no) }
+#ss .m-steps-h span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+/* short inline code keeps together; long paths may still wrap, cleanly */
+#ss .ss-md code.nb { white-space: nowrap }
+#ss .ss-md :not(pre) > code { -webkit-box-decoration-break: clone; box-decoration-break: clone; overflow-wrap: anywhere }
+/* a narrow column (split view) reads tighter */
+#ss .ss-log { container: chatlog / inline-size }
+@container chatlog (max-width: 560px) {
+  #ss .m-claude { font-size: 14px; line-height: 1.68 }
+  #ss .m-claude.between { font-size: 13.5px }
+  #ss .m-claude .ss-md p { margin-bottom: 0.8em }
+  #ss .m-claude .ss-md li { margin: 0.25em 0 }
+}
+/* a step's label is prose (Bash descriptions, agent tasks); paths and patterns stay monospace */
+#ss .m-tool[data-tool='Bash'] .m-tool-h span, #ss .m-tool[data-tool='Task'] .m-tool-h span, #ss .m-tool[data-tool='Agent'] .m-tool-h span, #ss .m-tool[data-tool='WebSearch'] .m-tool-h span { font: 13px ui-sans-serif, -apple-system, system-ui, sans-serif; color: var(--c-dim) }
+#ss .m-tool-h b { font-weight: 600 }
+#ss .m-claude.between { margin: 2px 0 }
+#ss .m-steps-b > .m-think { margin: 1px 0 1px 4px }
+#ss .m-claude .ss-md > :last-child { margin-bottom: 0 }
+#ss .m-claude .ss-md > :first-child { margin-top: 0 }
+
+/* ------------------------------------------------------------ the chat as a timeline */
+/* After Claude Code's desktop app: every item has a dot in one column down the left (a step's
+   is its status), text is one comfortable size, a command shows IN and OUT in a box. */
+#ss .ss-log { gap: 12px }
+#ss .ss-log > .m-claude, #ss .ss-log > .m-think, #ss .ss-log > .m-note, #ss .m-steps-b > .m-think { position: relative; padding-left: 22px }
+#ss .ss-log > .m-claude::before, #ss .ss-log > .m-think::before, #ss .m-steps-b > .m-think::before, #ss .ss-log > .m-note::before {
+  content: '' !important;
+  display: block !important;
+  position: absolute;
+  left: 3px;
+  top: 0.62em;
+  bottom: auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--n23) !important;
+  opacity: 1 !important;
+}
+#ss .ss-log > .m-note::before { top: 0.45em; width: 5px; height: 5px; left: 4px; opacity: 0.7 !important }
+#ss .ss-log > .m-note.err::before { background: var(--c-no) !important }
+#ss .ss-log > .m-claude.live::before { background: var(--c-turn) !important; animation: ss-pulse 1s ease-in-out infinite }
+#ss .m-claude { font-size: 14px; line-height: 1.62; color: var(--c-text) }
+#ss .m-claude.between { font-size: 14px; color: color-mix(in srgb, var(--c-text) 88%, var(--c-dim)) }
+#ss .m-claude .ss-md p { margin: 0 0 0.7em }
+#ss .m-claude .ss-md li { margin: 0.2em 0 }
+#ss .m-claude .ss-md :is(ul, ol) { margin: 0.1em 0 0.7em }
+#ss .m-claude .ss-md > :last-child { margin-bottom: 0 }
+/* thinking: one quiet line, open for the thought itself */
+#ss .m-think summary { font-size: 13.5px; color: var(--c-faint) }
+#ss .m-think[open] summary { color: var(--c-dim) }
+/* steps: the status dot in the same column, the label beside it, the body under the label */
+#ss .m-tool { margin: 0 }
+#ss .m-tool-h { padding: 1px 0; gap: 0; align-items: baseline }
+#ss .m-tool-h .bul { width: 7px; height: 7px; margin: 0 12px 0 3px; align-self: center; opacity: 1 }
+#ss .m-tool.done .bul { background: var(--c-ok); opacity: 0.85 }
+#ss .m-tool-h b { margin-right: 8px; font-size: 14px }
+#ss .m-tool-h span { font-size: 13.5px }
+#ss .m-tool-h .m-stat { margin-left: auto; padding-left: 8px; font-size: 12px; color: var(--c-faint) }
+#ss .m-tool-b { margin: 8px 0 4px 22px; border-radius: 8px }
+#ss .m-tool[data-tool='Bash'] .m-tool-b { border: 0; overflow: visible }
+#ss .m-steps-b { display: flex; flex-direction: column; gap: 10px }
+#ss .m-steps-h { display: none !important }
+#ss .m-steps.fold:not(.open) .m-steps-b { display: flex }
+/* a command: IN and OUT, three lines each until clicked */
+#ss .m-io { border: 1px solid var(--c-line); border-radius: 8px; background: var(--n3); overflow: hidden; cursor: pointer }
+#ss .m-io-r { display: grid; grid-template-columns: 40px minmax(0, 1fr) }
+#ss .m-io-r + .m-io-r { border-top: 1px solid var(--c-line) }
+#ss .m-io-r > span { padding: 9px 0 0 12px; font: 600 10.5px/1 ui-monospace, Menlo, monospace; letter-spacing: 0.04em; color: var(--c-faint) }
+#ss .m-io-r > pre { margin: 0; padding: 7px 12px 7px 4px; max-height: calc(3 * 1.5em + 14px); overflow: hidden; font: 12.5px/1.5 ui-monospace, Menlo, monospace; white-space: pre-wrap; word-break: break-word; color: var(--c-text); -webkit-mask-image: linear-gradient(black calc(100% - 1.2em), transparent); mask-image: linear-gradient(black calc(100% - 1.2em), transparent) }
+#ss .m-io-r.out > pre { background: color-mix(in srgb, var(--c-ok) 9%, transparent); color: color-mix(in srgb, var(--c-text) 90%, var(--c-dim)) }
+#ss .m-io-r.out.err > pre { background: color-mix(in srgb, var(--c-no) 10%, transparent); color: var(--err-lt) }
+#ss .m-io.full { cursor: default }
+#ss .m-io.full .m-io-r > pre { max-height: 460px; overflow: auto; -webkit-mask-image: none; mask-image: none }
+#ss .m-io:hover { border-color: color-mix(in srgb, var(--c-text) 18%, var(--c-line)) }
+/* an edit's diff: shown, but never a wall */
+#ss .m-tool[data-tool='Edit'] .m-tool-b, #ss .m-tool[data-tool='MultiEdit'] .m-tool-b, #ss .m-tool[data-tool='Write'] .m-tool-b { max-height: 260px; overflow: auto }
+/* the user's own message stays a bubble, set apart from the timeline */
+#ss .ss-log > .m-user { margin: 8px 0 2px }
+#ss .ss-log > .m-claude::before, #ss .ss-log > .m-think::before, #ss .m-steps-b > .m-think::before { left: 0 }
+#ss .ss-log > .m-note::before { left: 1px }
+#ss .m-tool-h .bul { margin-left: 0; margin-right: 15px }
+#ss .m-io-r > pre { padding: 6px 12px 6px 2px; font-size: 12px }
+#ss .m-io-r > span { padding-top: 8px }
+
+/* ------------------------------------------------------------ four chats, two by two */
+#ss .ws-cols.grid { gap: 1px; background: var(--c-line) }
+#ss .ws-cols.grid .ws-col { background: var(--n2); border-left: 0 !important }
+#ss .ws-rz.h { left: 0; right: 0; bottom: auto; width: auto; height: 8px; cursor: row-resize }
+#ss .ws-rz.h::after { top: 3.5px; bottom: auto; left: 0; right: 0; width: auto; height: 1px }
+#ss .ws-rz.h:hover::after, #ss .ws-rz.h.drag::after { top: 3px; left: 0; width: auto; height: 2px }
+#ss .ws-cols.grid .ss-log { padding-inline: 12px }
+#ss .ws-cols.grid .cx, #ss .ws-cols.grid .ss-tasks { margin-inline: 10px }
+
+/* a message on the page the moment it is sent, until the host's copy replaces it */
+#ss .m-user.sending { opacity: 0.72 }
+#ss .m-user.sending.slow::after { content: 'Reconnecting to Claude…'; display: block; margin-top: 6px; color: var(--c-faint); font-size: 11.5px }

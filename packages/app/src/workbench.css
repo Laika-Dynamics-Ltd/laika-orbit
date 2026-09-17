@@ -1,0 +1,76 @@
+/* Workbench nav rail — ships with workbench.ts. A slim column down the left edge under the
+   header; the page's grid and the full-screen Claude panel make room for it. */
+#wbn {
+  position: fixed;
+  top: 52px;
+  left: 0;
+  bottom: 0;
+  z-index: 75;
+  width: 56px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 0 12px;
+  border-right: 1px solid var(--n13);
+  background: var(--n2);
+}
+#wbn button {
+  position: relative;
+  width: 44px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 7px 0 5px;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  color: var(--n24);
+  font: 500 9.5px/1 ui-sans-serif, -apple-system, system-ui, sans-serif;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background-color 0.12s, color 0.12s;
+}
+#wbn button:hover { background: var(--n6); color: var(--n34) }
+#wbn button.on { color: var(--n34); background: var(--n9) }
+#wbn button.on svg { color: var(--acc) }
+/* a view whose server is not answering: still clickable, to say so and how to start it */
+#wbn button.down svg { opacity: 0.45 }
+#wbn button.on::before { content: ''; position: absolute; left: -6px; top: 9px; bottom: 9px; width: 3px; border-radius: 0 3px 3px 0; background: var(--acc) }
+#wbn button:focus-visible { outline: 2px solid var(--acc); outline-offset: 1px }
+.wbn-fill { flex: 1 }
+/* arranging the page above, the views over it below */
+.wbn-sep { flex: none; width: 26px; height: 1px; margin: 5px 0; background: var(--n13) }
+/* sessions waiting on you: the accent, like everything else that means "your turn" */
+.wbn-badge {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--acc);
+  color: var(--acc-ink);
+  font: 700 10px/16px ui-sans-serif, -apple-system, system-ui, sans-serif;
+  text-align: center;
+  box-shadow: 0 0 0 2px var(--n2);
+}
+.wbn-badge[hidden] { display: none }
+#wbn button[hidden] { display: none }
+
+body.has-wbn main { margin-left: 56px }
+body.has-wbn #ss:not(.dock) { left: 56px }
+/* History covers the page but not the rail or the header, like Claude and agent control, so
+   the button that opened it can close it */
+body.has-wbn #hist { top: 52px; left: 56px }
+@media (max-width: 700px) {
+  #wbn { width: 44px }
+  #wbn button { width: 36px }
+  #wbn button span { display: none }
+  .wbn-badge { top: 1px; right: 0 }
+  body.has-wbn main { margin-left: 44px }
+  body.has-wbn #ss:not(.dock) { left: 44px }
+  body.has-wbn #hist { left: 44px }
+}

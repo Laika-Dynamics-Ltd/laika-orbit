@@ -1,0 +1,514 @@
+/* Browser dock — ships with browser.ts. Sits over the map inside #stage; the native tab view
+   is drawn by the shell exactly over .wb-view. Uses the app tokens from style.css. */
+#wb {
+  --w-line: var(--n14);
+  --w-soft: var(--n6);
+  --w-bar: var(--n3);
+  --w-text: var(--n34);
+  --w-dim: var(--n27);
+  --w-faint: var(--n24);
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: none;
+  flex-direction: column;
+  background: var(--n2);
+  color: var(--w-text);
+  font: 400 13px/1.5 ui-sans-serif, -apple-system, system-ui, sans-serif;
+  text-align: left;
+}
+#wb.on { display: flex }
+#wb * { box-sizing: border-box }
+#wb button { font: inherit; color: inherit; cursor: pointer; background: none; border: 0; border-radius: 6px; padding: 0 }
+#wb button:disabled { opacity: .35; cursor: default }
+#wb :focus-visible { outline: 2px solid var(--acc); outline-offset: 1px }
+#wb [hidden] { display: none !important }
+#wb kbd { font-size: 10px; padding: 0 4px }
+#wb small { color: var(--w-faint); font-size: 11px }
+#wb h2 { font-size: 15px; font-weight: 600; margin: 0 }
+
+/* header button */
+.wb-hbtn { position: relative; display: inline-flex; align-items: center; gap: 5px }
+.wb-hbtn.on { color: var(--acc); border-color: var(--acc-bd) }
+.wb-hbtn b { font: 600 10px ui-monospace, Menlo, monospace; color: var(--acc) }
+/* inside the shell the window's title bar is hidden: room for the traffic lights, and the
+   header drags the window */
+body.in-shell > header { padding-left: 84px; -webkit-app-region: drag }
+body.in-shell > header :is(button, input, form, a, .tool, #hdr) { -webkit-app-region: no-drag }
+
+/* ------------------------------------------------------------------ tab strip */
+.wb-tabs {
+  flex: none;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 38px;
+  padding: 6px 8px 0;
+  background: var(--w-bar);
+  border-bottom: 1px solid var(--w-line);
+}
+.wb-strip { display: flex; gap: 2px; min-width: 0; flex: 1; overflow-x: auto; scrollbar-width: none }
+.wb-strip::-webkit-scrollbar { display: none }
+.wb-tab {
+  position: relative;
+  flex: 0 1 220px;
+  min-width: 96px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 31px;
+  padding: 0 8px 0 10px;
+  border-radius: 8px 8px 0 0;
+  color: var(--w-dim);
+  background: transparent;
+  white-space: nowrap;
+}
+.wb-tab::before {
+  content: '';
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  top: 0;
+  height: 2px;
+  border-radius: 0 0 2px 2px;
+  background: var(--pc);
+  opacity: .55;
+}
+.wb-tab:hover { background: var(--n6); color: var(--w-text) }
+.wb-tab.on { background: var(--n9); color: var(--w-text) }
+.wb-tab.on::before { opacity: 1; height: 3px }
+.wb-tab.sleeping { opacity: .6 }
+.wb-fav { width: 14px; height: 14px; flex: none; border-radius: 3px; display: inline-block }
+i.wb-fav { border: 1.5px solid var(--pc); opacity: .6; border-radius: 50% }
+.wb-tab.loading i.wb-fav {
+  border-color: var(--pc) transparent var(--pc) transparent;
+  opacity: 1;
+  animation: wb-spin .8s linear infinite;
+}
+@keyframes wb-spin { to { transform: rotate(360deg) } }
+.wb-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 12.5px }
+.wb-audio { font-size: 11px; font-weight: 400 }
+.wb-x {
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  line-height: 18px;
+  text-align: center;
+  font-size: 15px;
+  color: var(--w-faint);
+  opacity: 0;
+}
+.wb-tab:hover .wb-x, .wb-tab.on .wb-x { opacity: 1 }
+.wb-x:hover { background: var(--n19); color: var(--w-text) }
+.wb-new {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  margin-bottom: 2px;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--w-dim);
+}
+.wb-new:hover { background: var(--n9); color: var(--w-text) }
+
+/* ------------------------------------------------------------------ nav bar */
+.wb-nav {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 44px;
+  padding: 0 8px;
+  background: var(--w-bar);
+  border-bottom: 1px solid var(--w-line);
+}
+.wb-ib {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--w-dim);
+}
+.wb-ib:hover:not(:disabled) { background: var(--n9); color: var(--w-text) }
+.wb-close { margin-left: 2px }
+.wb-prof {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  max-width: 190px;
+  padding: 0 10px 0 8px;
+  margin: 0 4px 0 6px;
+  border: 1px solid var(--w-line);
+  border-radius: 15px;
+  color: var(--w-text);
+  font-size: 12px;
+  font-weight: 600;
+}
+.wb-prof i, .wb-pdot i, .wb-pcard i, .wb-start-prof i {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--pc);
+  box-shadow: 0 0 8px var(--pc);
+  flex: none;
+}
+.wb-prof span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.wb-prof:hover { background: var(--n9) }
+.wb-omni {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  height: 32px;
+  margin: 0 4px;
+  padding: 0 10px 0 8px;
+  background: var(--w-soft);
+  border: 1px solid var(--w-line);
+  border-radius: 16px;
+}
+.wb-omni:focus-within { border-color: var(--acc); background: var(--n9) }
+.wb-omni input {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: 0;
+  color: var(--w-text);
+  font: 13px ui-sans-serif, -apple-system, system-ui, sans-serif;
+  outline: none;
+}
+.wb-omni input::placeholder { color: var(--w-faint) }
+.wb-lock { width: 16px; height: 16px; flex: none; margin-right: 6px; border-radius: 50% }
+.wb-lock.https { background: radial-gradient(circle, var(--ok) 0 3px, transparent 3.5px) }
+.wb-lock.plain { background: radial-gradient(circle, var(--warn) 0 3px, transparent 3.5px) }
+.wb-dl {
+  flex: none;
+  max-width: 220px;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--w-line);
+  border-radius: 13px;
+  color: var(--w-dim);
+  font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wb-dl:hover { color: var(--w-text); border-color: var(--n19) }
+.wb-dl.idle { width: 26px; padding: 0; text-align: center }
+.wb-zoom { flex: none; height: 22px; padding: 0 8px; border: 1px solid var(--w-line); border-radius: 11px; color: var(--w-dim); font-size: 11px; font-variant-numeric: tabular-nums }
+.wb-zoom:hover { color: var(--w-text); border-color: var(--n19) }
+
+/* downloads panel: the extensions card's rows, with a name that opens the file */
+#wb .wb-dlrow { align-items: center; gap: 6px }
+.wb-dlname { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; padding: 0 !important; background: none }
+.wb-dlname b, .wb-dlname small { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.wb-dlname small { color: var(--w-faint); font-size: 11.5px }
+.wb-dlname:not(:disabled):hover b { text-decoration: underline }
+.wb-dlname:disabled { cursor: default }
+.wb-dlrow.cancelled b, .wb-dlrow.interrupted b, .wb-dlrow.gone b { color: var(--w-dim) !important; text-decoration: line-through }
+.wb-dlrow.interrupted small { color: var(--warn) }
+.wb-dlbar { display: block; width: 100%; height: 3px; margin-top: 3px; border-radius: 2px; background: var(--w-line); overflow: hidden }
+.wb-dlbar i { display: block; height: 100%; background: var(--acc); transition: width .2s }
+#wb .wb-dlrow .wb-ib { width: 28px; height: 28px; opacity: .5 }
+#wb .wb-dlrow:hover .wb-ib { opacity: 1 }
+
+/* find bar */
+.wb-find {
+  position: absolute;
+  top: 88px;
+  right: 16px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  background: var(--n6);
+  border: 1px solid var(--w-line);
+  border-radius: 10px;
+  box-shadow: 0 18px 40px -18px black;
+}
+.wb-find input {
+  width: 220px;
+  height: 28px;
+  padding: 0 8px;
+  background: var(--w-soft);
+  border: 1px solid var(--w-line);
+  border-radius: 6px;
+  color: var(--w-text);
+  font: inherit;
+  outline: none;
+}
+.wb-find input:focus { border-color: var(--acc) }
+.wb-find span { min-width: 48px; text-align: center; color: var(--w-faint); font-size: 11px; font-variant-numeric: tabular-nums }
+
+/* suggestions, under the omnibox */
+.wb-sugg {
+  position: absolute;
+  top: 82px;
+  left: 140px;
+  right: 140px;
+  z-index: 3;
+  padding: 6px;
+  background: color-mix(in srgb, var(--n4) 98%, transparent);
+  border: 1px solid var(--w-line);
+  border-radius: 12px;
+  box-shadow: 0 24px 50px -20px black;
+}
+.wb-sugg button, .wb-pop button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 7px;
+  text-align: left;
+  color: var(--w-text);
+}
+.wb-sugg button span, .wb-pop button span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.wb-sugg button:hover, .wb-sugg button.sel, .wb-pop button:hover, .wb-pop button:focus-visible { background: var(--n13) }
+.wb-sg { width: 14px; height: 14px; flex: none; border-radius: 50%; border: 1.5px solid var(--w-faint) }
+.wb-sg.q { border-radius: 50% 50% 50% 0 }
+.wb-sg.go { border-color: var(--ok) }
+.wb-sg.h { border-style: dashed }
+
+/* menus */
+.wb-pop {
+  position: absolute;
+  z-index: 5;
+  min-width: 240px;
+  padding: 6px;
+  background: color-mix(in srgb, var(--n4) 98%, transparent);
+  border: 1px solid var(--w-line);
+  border-radius: 10px;
+  box-shadow: 0 24px 50px -20px black;
+}
+.wb-pop button i { width: 10px; height: 10px; border-radius: 50%; flex: none }
+.wb-pop button i.none { background: none }
+
+/* ------------------------------------------------------------------ the view */
+.wb-view { flex: 1; min-height: 0; position: relative; overflow: auto; background: var(--n2) }
+.wb-waking { position: absolute; inset: 0; display: grid; place-items: center; color: var(--w-faint) }
+
+/* start page and cards */
+.wb-start { max-width: 720px; margin: 0 auto; padding: 48px 28px 40px }
+.wb-start-prof { display: flex; align-items: center; gap: 9px; font-size: 20px; font-weight: 600; margin-bottom: 26px }
+.wb-start-prof small { font-weight: 400; font-size: 14px }
+.wb-lt { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--w-faint); margin: 18px 0 8px; font-weight: 600 }
+.wb-lt small { text-transform: none; letter-spacing: 0; font-weight: 400; margin-left: 8px }
+.wb-recent { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 6px }
+.wb-rc {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 8px 11px;
+  border: 1px solid var(--w-line);
+  border-radius: 9px;
+  text-align: left;
+  min-width: 0;
+}
+.wb-rc:hover { border-color: var(--n19); background: var(--w-soft) }
+.wb-rc span, .wb-rc small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block }
+.wb-profcards, .wb-chrome { display: flex; flex-wrap: wrap; gap: 8px }
+.wb-pcard {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 12px 0 10px;
+  border: 1px solid var(--w-line);
+  border-radius: 17px;
+  font-weight: 600;
+  font-size: 12.5px;
+}
+.wb-pcard small { font-weight: 400 }
+.wb-pcard:hover { border-color: var(--pc); background: var(--w-soft) }
+.wb-pcard.add { color: var(--w-dim); font-weight: 500 }
+.wb-pcard.add i { background: none; box-shadow: none; width: auto; height: auto; font-style: normal; font-size: 15px }
+.wb-hint { margin-top: 30px; color: var(--w-faint); font-size: 12px }
+
+.wb-card { max-width: 640px; margin: 48px auto; padding: 22px 26px; border: 1px solid var(--w-line); border-radius: 14px; background: var(--w-soft) }
+.wb-card p { color: var(--w-dim); margin: 10px 0; line-height: 1.6 }
+.wb-card p b { color: var(--w-text); font-weight: 600 }
+.wb-card pre { display: flex; align-items: center; gap: 10px; margin: 14px 0; padding: 10px 14px; border-radius: 9px; background: var(--n3); border: 1px solid var(--w-line) }
+.wb-card pre code { flex: 1; font: 13px ui-monospace, Menlo, monospace; color: var(--acc) }
+.wb-card pre button { padding: 4px 10px; font-size: 11px; border: 1px solid var(--w-line); color: var(--w-dim) }
+.wb-card pre button:hover { color: var(--w-text) }
+
+/* profiles panel: sits over the view (the shell steps aside while it shows) */
+.wb-profiles { position: absolute; top: 83px; left: 0; right: 0; bottom: 0; z-index: 4; overflow: auto; background: color-mix(in srgb, var(--n2) 96%, transparent) }
+.wb-prof-card { max-width: 720px }
+.wb-card-h { display: flex; align-items: center; gap: 12px; margin-bottom: 14px }
+.wb-card-h span { flex: 1; color: var(--w-faint); font-size: 12px }
+.wb-plist { display: flex; flex-direction: column; gap: 4px }
+.wb-prow { display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 6px 0 8px; border-radius: 9px }
+.wb-prow:hover { background: var(--n3) }
+.wb-pdot { width: 26px; height: 26px; display: grid; place-items: center }
+.wb-pdot i { width: 12px; height: 12px }
+.wb-pname { flex: 1; min-width: 0; height: 28px; padding: 0 8px; background: none; border: 1px solid transparent; border-radius: 6px; color: var(--w-text); font: 600 13px ui-sans-serif, -apple-system, system-ui, sans-serif }
+.wb-pname:hover, .wb-pname:focus { border-color: var(--w-line); background: var(--w-soft); outline: none }
+.wb-pmeta { color: var(--w-faint); font-size: 11.5px; white-space: nowrap }
+.wb-pstar { width: 28px; height: 28px; font-size: 15px; color: var(--w-faint) }
+.wb-pstar.on { color: var(--warn) }
+.wb-pstar:hover { color: var(--warn) }
+.wb-prow .wb-ib { font-size: 14px; width: 28px; height: 28px }
+.wb-padd { display: flex; align-items: center; gap: 10px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--w-line) }
+.wb-padd input:not([type=radio]) { flex: 1; height: 32px; padding: 0 10px; background: var(--n3); border: 1px solid var(--w-line); border-radius: 8px; color: var(--w-text); font: inherit; outline: none }
+.wb-padd input:not([type=radio]):focus { border-color: var(--acc) }
+.wb-padd button[type=submit] { background: var(--acc); color: var(--acc-ink); font-weight: 650; padding: 7px 14px; border-radius: 8px }
+.wb-swatches { display: flex; gap: 5px }
+.wb-swatches label { cursor: pointer }
+.wb-swatches input { position: absolute; opacity: 0; width: 0; height: 0 }
+.wb-swatches i { display: block; width: 16px; height: 16px; border-radius: 50%; border: 2px solid transparent; opacity: .6 }
+.wb-swatches input:checked + i { opacity: 1; border-color: var(--n37); box-shadow: 0 0 0 1px black }
+.wb-swatches label:hover i { opacity: 1 }
+
+/* ------------------------------------------------------------------ Chrome-style tabs */
+/* The strip is the window frame; the active tab is cut from the toolbar under it, its bottom
+   corners flaring into it; the others sit on the frame with hairline separators between them. */
+#wb { --tab-frame: var(--n1); --tab-top: var(--n6) }
+#wb .wb-tabs { height: 42px; padding: 8px 8px 0 4px; gap: 0; background: var(--tab-frame); border-bottom: 0; align-items: flex-end }
+#wb .wb-strip { gap: 0; padding: 0 12px; align-items: flex-end; height: 100% }
+#wb .wb-tab {
+  flex: 0 1 240px;
+  min-width: 42px;
+  height: 34px;
+  gap: 8px;
+  padding: 0 7px 0 13px;
+  border-radius: 10px 10px 0 0;
+  color: var(--w-dim);
+  background: transparent;
+  container: wbtab / inline-size;
+  transition: background-color 0.12s, color 0.12s;
+}
+#wb .wb-tab::before { content: none }
+#wb .wb-tab:not(.on):hover { color: var(--w-text) }
+#wb .wb-tab:not(.on):hover::after { content: ''; position: absolute; inset: 4px 3px 5px; z-index: -1; border-radius: 8px; background: color-mix(in srgb, var(--tab-top) 70%, transparent) }
+#wb .wb-tab.on { z-index: 2; background-color: var(--tab-top); color: var(--w-text) }
+#wb .wb-tab.on::before, #wb .wb-tab.on::after { content: ''; position: absolute; bottom: 0; width: 10px; height: 10px; pointer-events: none }
+#wb .wb-tab.on::before { left: -10px; background: radial-gradient(circle at 0 0, transparent 9.5px, var(--tab-top) 10px) }
+#wb .wb-tab.on::after { right: -10px; background: radial-gradient(circle at 100% 0, transparent 9.5px, var(--tab-top) 10px) }
+/* the profile, as Chrome shows a tab group: a colour line under the tab */
+#wb .wb-tab { background-image: linear-gradient(color-mix(in srgb, var(--pc) 75%, transparent), color-mix(in srgb, var(--pc) 75%, transparent)); background-repeat: no-repeat; background-size: calc(100% - 30px) 2px; background-position: 15px calc(100% - 3px) }
+#wb .wb-tab.on { background-image: linear-gradient(var(--pc), var(--pc)); background-position: 12px 0; background-size: calc(100% - 24px) 2px }
+/* hairline separators, hidden next to the active or hovered tab */
+#wb .wb-sep { position: absolute; left: 0; top: 10px; bottom: 11px; width: 1px; background: var(--n16) }
+#wb .wb-tab:first-child .wb-sep, #wb .wb-tab.on .wb-sep, #wb .wb-tab.on + .wb-tab .wb-sep, #wb .wb-tab:hover .wb-sep, #wb .wb-tab:hover + .wb-tab .wb-sep { opacity: 0 }
+#wb .wb-fav { width: 16px; height: 16px; border-radius: 3px }
+#wb i.wb-fav { border-width: 2px; opacity: 0.7 }
+#wb .wb-title { font-size: 12.5px; text-overflow: clip; -webkit-mask-image: linear-gradient(90deg, black calc(100% - 16px), transparent); mask-image: linear-gradient(90deg, black calc(100% - 16px), transparent) }
+#wb .wb-audio { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; color: var(--w-dim) }
+#wb .wb-audio:hover { background: var(--n12); color: var(--w-text) }
+#wb .wb-x { display: grid; place-items: center; flex: none; width: 20px; height: 20px; border-radius: 50%; opacity: 0; color: var(--w-dim) }
+#wb .wb-tab:hover .wb-x, #wb .wb-tab.on .wb-x { opacity: 1 }
+#wb .wb-x:hover { background: var(--n14); color: var(--w-text) }
+/* narrow tabs: the favicon only, as Chrome does with many tabs open */
+@container wbtab (max-width: 88px) {
+  #wb .wb-title { display: none }
+  #wb .wb-tab:not(.on) .wb-x { display: none }
+}
+@container wbtab (max-width: 60px) {
+  #wb .wb-tab.on .wb-x { display: none }
+}
+#wb .wb-tab.sleeping .wb-fav, #wb .wb-tab.sleeping .wb-title { opacity: 0.55 }
+#wb .wb-new { display: grid; place-items: center; width: 28px; height: 28px; margin: 0 0 4px 2px; border-radius: 50%; color: var(--w-dim) }
+#wb .wb-new:hover { background: var(--n9); color: var(--w-text) }
+
+/* toolbar: the same surface as the active tab, round buttons, a pill of an address bar */
+#wb .wb-nav { height: 46px; padding: 0 8px; gap: 2px; background: var(--tab-top); border-bottom: 1px solid var(--w-line) }
+#wb .wb-ib { width: 32px; height: 32px; border-radius: 50%; color: var(--w-dim) }
+#wb .wb-ib:hover:not(:disabled) { background: var(--n12); color: var(--w-text) }
+#wb .wb-omni { height: 34px; margin: 0 6px; padding: 0 14px 0 12px; border: 1px solid transparent; border-radius: 17px; background: var(--tab-frame) }
+#wb .wb-omni:hover { background: color-mix(in srgb, var(--tab-frame) 70%, var(--tab-top)) }
+#wb .wb-omni:focus-within { background: var(--tab-frame); border-color: var(--acc); box-shadow: 0 0 0 1px var(--acc) }
+#wb .wb-omni input { font-size: 13.5px }
+#wb .wb-prof { height: 30px; border-color: transparent; background: var(--tab-frame) }
+#wb .wb-tab { isolation: isolate }
+#wb i.wb-fav { border-radius: 50% }
+/* the older tab-line rule sets top/left/right on these pseudo-elements: the flares sit at the bottom */
+#wb .wb-tab.on::before { top: auto; right: auto; height: 10px; border-radius: 0; opacity: 1 }
+#wb .wb-tab.on::after { top: auto; left: auto; height: 10px; border-radius: 0 }
+#wb .wb-prof { border-radius: 15px }
+
+/* ------------------------------------------------------------------ extensions */
+#wb .wb-actions { display: inline-flex; align-items: center }
+#wb .wb-actions:empty { display: none }
+#wb browser-action-list { display: flex; align-items: center; gap: 2px }
+#wb browser-action-list::part(action) { width: 32px; height: 32px; border-radius: 50%; background-size: 16px; background-position: center; background-repeat: no-repeat }
+#wb browser-action-list::part(action):hover { background-color: var(--n12) }
+#wb browser-action-list::part(badge) { font: 600 9px/1 ui-sans-serif, -apple-system, system-ui, sans-serif; border-radius: 6px }
+#wb .wb-ext-card { max-width: 680px }
+#wb .wb-xprof { flex: none !important; display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px 2px 8px; border-radius: 999px; background: var(--n3); color: var(--w-text) !important; font-size: 12px !important; font-weight: 600 }
+#wb .wb-xprof i { width: 8px; height: 8px; border-radius: 50%; background: var(--pc) }
+#wb .wb-xlist { display: flex; flex-direction: column; gap: 2px; margin-bottom: 10px }
+#wb .wb-xrow { display: flex; align-items: baseline; gap: 8px; min-height: 38px; padding: 8px 8px 8px 10px; border-radius: 9px }
+#wb .wb-xrow:hover { background: var(--n3) }
+#wb .wb-xrow b { font-weight: 600; font-size: 13px; color: var(--w-text) }
+#wb .wb-xfill { flex: 1 }
+#wb .wb-xwarn { font-style: normal; font-size: 11.5px; color: var(--warn) }
+#wb .wb-xbtn { align-self: center; height: 28px; padding: 0 12px !important; border: 1px solid var(--w-line) !important; border-radius: 14px !important; color: var(--w-text); font-size: 12px }
+#wb .wb-xbtn:hover:not(:disabled) { background: var(--n9) }
+#wb .wb-xbtn.add { border-color: color-mix(in srgb, var(--acc) 50%, var(--w-line)) !important; color: var(--acc) }
+#wb .wb-xnone { margin: 4px 10px 12px; color: var(--w-faint) }
+#wb .wb-xfoot { display: flex; align-items: center; gap: 12px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--w-line) }
+#wb .wb-xerr { margin: 6px 10px; color: var(--err-lt); font-size: 12px }
+
+/* ------------------------------------------------------------------ the browser stands out */
+/* A step lighter than the rest of 1brain, like Chrome's dark theme against a darker desktop:
+   the frame, the active tab and toolbar, and brighter text. Mixed from the theme's own ramp
+   toward its text colour, so every theme lifts the same way. */
+#wb {
+  --tab-frame: color-mix(in srgb, var(--n9), var(--n34) 10%);
+  --tab-top: color-mix(in srgb, var(--n14), var(--n34) 16%);
+  --w-text: var(--n35);
+  --w-dim: color-mix(in srgb, var(--n27), var(--n34) 40%);
+  --w-faint: color-mix(in srgb, var(--n24), var(--n34) 28%);
+  --w-line: color-mix(in srgb, var(--n16), var(--n34) 14%);
+  --w-soft: var(--tab-frame);
+  background: var(--tab-top);
+  box-shadow: inset 1px 0 0 color-mix(in srgb, var(--n34) 12%, transparent);
+}
+#wb .wb-sep { background: color-mix(in srgb, var(--w-dim) 40%, transparent) }
+#wb .wb-tab:not(.on) { color: var(--w-dim) }
+#wb .wb-tab.on { color: var(--w-text) }
+#wb .wb-ib, #wb .wb-new { color: var(--w-dim) }
+#wb .wb-ib:hover:not(:disabled), #wb .wb-new:hover, #wb .wb-x:hover, #wb .wb-audio:hover { background: color-mix(in srgb, var(--n34) 12%, transparent); color: var(--w-text) }
+#wb .wb-omni input { color: var(--w-text) }
+#wb .wb-profiles { background: color-mix(in srgb, var(--tab-top) 97%, transparent) }
+#wb .wb-card { background: var(--tab-frame); border-color: var(--w-line) }
+#wb .wb-xrow:hover, #wb .wb-prow:hover { background: color-mix(in srgb, var(--n34) 7%, transparent) }
+
+/* ------------------------------------------------------------------ bookmarks */
+/* the bar shares the toolbar's surface, as in Chrome: no line between them */
+#wb .wb-nav:has(+ .wb-bmarks:not([hidden])) { border-bottom-color: transparent }
+#wb .wb-bmarks { flex: none; display: flex; align-items: center; gap: 2px; height: 30px; padding: 0 8px 3px; background: var(--tab-top); border-bottom: 1px solid var(--w-line) }
+#wb .wb-bmlist { flex: 1; min-width: 0; display: flex; align-items: center; gap: 2px; overflow: hidden }
+#wb .wb-bm { flex: none; display: flex; align-items: center; gap: 6px; max-width: 180px; height: 26px; padding: 0 9px 0 7px; border-radius: 13px; color: var(--w-dim); font-size: 12px }
+#wb .wb-bm span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+#wb .wb-bm:hover { background: color-mix(in srgb, var(--n34) 12%, transparent); color: var(--w-text) }
+#wb .wb-bm .wb-fav { flex: none; width: 14px; height: 14px }
+#wb .wb-bm.drop { box-shadow: inset 2px 0 0 var(--acc) }
+#wb .wb-bm.drop-after { box-shadow: inset -2px 0 0 var(--acc) }
+#wb .wb-bmmore { width: 26px; padding: 0; justify-content: center }
+#wb .wb-bmnone { padding: 0 6px; color: var(--w-faint); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+
+/* the star in the address bar, filled once the page is saved */
+#wb .wb-star { flex: none; display: grid; place-items: center; width: 26px; height: 26px; margin-right: -8px; border-radius: 50%; color: var(--w-dim) }
+#wb .wb-star:hover { background: color-mix(in srgb, var(--n34) 12%, transparent); color: var(--w-text) }
+#wb .wb-star.on { color: var(--acc) }
+#wb .wb-star.on svg { fill: currentColor }
+
+#wb .wb-bmedit { position: absolute; z-index: 6; width: min(340px, calc(100% - 16px)); margin: 0; padding: 14px 16px; background: var(--tab-frame); border: 1px solid var(--w-line); border-radius: 12px; box-shadow: 0 24px 50px -20px black }
+#wb .wb-bmedit h3 { margin: 0 0 10px; font-size: 14px; font-weight: 600 }
+#wb .wb-bmedit label { display: flex; align-items: center; gap: 10px; margin: 6px 0; color: var(--w-dim); font-size: 12px }
+#wb .wb-bmedit label span { flex: none; width: 38px }
+#wb .wb-bmedit input { flex: 1; min-width: 0; height: 30px; padding: 0 10px; border: 1px solid var(--w-line); border-radius: 7px; background: var(--tab-top); color: var(--w-text); font: inherit; font-size: 13px; outline: none }
+#wb .wb-bmedit input:focus { border-color: var(--acc) }
+#wb .wb-bmfoot { display: flex; align-items: center; gap: 8px; margin-top: 12px }
+#wb .wb-bmfoot small { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }

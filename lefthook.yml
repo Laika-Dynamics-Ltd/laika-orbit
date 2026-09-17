@@ -1,0 +1,8 @@
+pre-commit:
+  parallel: true
+  commands:
+    format:
+      glob: '*.{ts,mjs,json,css}'
+      run: npx biome check --write {staged_files} && git add {staged_files}
+    typecheck:
+      run: npx tsc -p packages/core/tsconfig.json --noEmit

@@ -1,0 +1,227 @@
+/* Control — information first: readable sizes, one accent per meaning, no decoration */
+.ctl {
+  --bg: var(--n2);
+  --panel: var(--n6);
+  --line: var(--n16);
+  --tx: var(--n35);
+  --dim: var(--n29);
+  --faint: var(--n24);
+  --hot: var(--acc); /* your turn */
+  --warn: var(--warn); /* at risk / blocked */
+  --bad: var(--err); /* would be lost */
+  --live: var(--cyan); /* running */
+}
+.ctl { color: var(--tx); font: 400 14px/1.45 system-ui, -apple-system, sans-serif; text-align: left }
+.ctl * { box-sizing: border-box }
+.ctl code { font: 12px ui-monospace, Menlo, monospace; color: var(--live) }
+.ctl-page { margin: 0; background: var(--n2) }
+
+.ctl .c-top {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 12px 24px;
+  background: color-mix(in srgb, var(--n2) 92%, transparent);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--line);
+}
+.ctl .c-brand { display: flex; align-items: baseline; gap: 8px }
+.ctl .c-brand b { font-weight: 700; letter-spacing: 0.04em }
+.ctl .c-brand span:last-child { color: var(--faint) }
+.ctl .c-mark { width: 9px; height: 9px; border-radius: 50%; background: var(--hot); align-self: center }
+.ctl .c-chips { display: flex; gap: 8px; flex-wrap: wrap }
+.ctl .c-chip { padding: 4px 11px; border-radius: 999px; border: 1px solid var(--line); color: var(--dim); font-size: 13px }
+.ctl .c-chip b { color: var(--tx); font-weight: 700; margin-right: 3px }
+.ctl .c-chip.hot { border-color: var(--hot); color: var(--hot) }
+.ctl .c-chip.hot b, .ctl .c-chip.warn b, .ctl .c-chip.bad b { color: inherit }
+.ctl .c-chip.warn { border-color: var(--warn); color: var(--warn) }
+.ctl .c-chip.bad { border-color: var(--bad); color: var(--bad) }
+.ctl .c-chip.live b { color: var(--live) }
+.ctl .c-right { margin-left: auto; display: flex; align-items: center; gap: 10px }
+.ctl .c-right time { color: var(--dim); font-variant-numeric: tabular-nums; min-width: 44px; text-align: right }
+
+.ctl .c-btn {
+  font: 500 12.5px system-ui, sans-serif;
+  padding: 5px 11px;
+  border-radius: 7px;
+  border: 1px solid var(--info);
+  background: var(--info);
+  color: var(--info-ink);
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.ctl .c-btn.ghost { background: transparent; border-color: var(--line); color: var(--dim) }
+.ctl .c-btn:hover { filter: brightness(1.15) }
+.ctl .c-btn.ghost:hover { color: var(--tx); border-color: var(--n21) }
+
+.ctl .c-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: 28px;
+  padding: 20px 24px 0;
+  max-width: 1500px;
+  margin: 0 auto;
+}
+.ctl .c-col { min-width: 0 }
+.ctl h2 {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 22px 0 10px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.ctl .c-col > h2:first-child { margin-top: 4px }
+.ctl h2 em { font-style: normal; color: var(--tx) }
+.ctl h2 small { font-size: 12px; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--faint) }
+
+.ctl .c-list { display: flex; flex-direction: column; gap: 10px }
+.ctl .c-empty { margin: 4px 0; color: var(--faint) }
+
+.ctl .c-card, .ctl .c-repo {
+  padding: 13px 15px;
+  border-radius: 10px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left-width: 3px;
+}
+.ctl .c-card.needs-you { border-left-color: var(--hot) }
+.ctl .c-card.blocked { border-left-color: var(--warn) }
+.ctl .c-repo { border-left-color: var(--warn) }
+.ctl .c-card-top { display: flex; justify-content: space-between; gap: 12px; font-size: 12.5px; color: var(--dim) }
+.ctl .c-where { font-weight: 600; color: var(--n32); overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.ctl .c-branch { margin-left: 6px; padding: 1px 6px; border-radius: 4px; background: var(--n13); color: var(--dim); font: 11.5px ui-monospace, Menlo, monospace }
+.ctl .c-age { flex: none; font-variant-numeric: tabular-nums }
+.ctl .c-card.needs-you .c-age { color: var(--hot) }
+.ctl .c-card.blocked .c-age { color: var(--warn) }
+.ctl .c-title { margin-top: 5px; font-size: 15px; font-weight: 600; color: var(--tx) }
+.ctl .c-latest {
+  margin: 6px 0 0;
+  color: var(--dim);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.ctl .c-tool { margin: 6px 0 0; color: var(--warn); font-size: 13px }
+.ctl .c-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 11px }
+
+.ctl .c-badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px }
+.ctl .c-badge { padding: 2px 8px; border-radius: 5px; font-size: 12.5px; background: var(--n13); color: var(--dim) }
+.ctl .c-badge.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 10%, transparent) }
+.ctl .c-badge.bad { color: var(--bad); background: color-mix(in srgb, var(--err) 12%, transparent); font-weight: 600 }
+
+.ctl .c-list.compact { gap: 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--panel) }
+.ctl .c-row {
+  display: grid;
+  grid-template-columns: 10px minmax(120px, 0.8fr) minmax(0, 1.6fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 13px;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+}
+.ctl .c-row:first-child { border-top: 0 }
+.ctl .c-row .c-title { margin: 0; font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.ctl .c-row .c-meta { color: var(--faint); white-space: nowrap; font-variant-numeric: tabular-nums }
+.ctl .c-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint) }
+.ctl .c-row.working .c-dot { background: var(--live); box-shadow: 0 0 8px var(--live); animation: c-pulse 1.6s ease-in-out infinite }
+.ctl .c-row.ended .c-dot { background: var(--err-bd) }
+
+.ctl .c-more { margin-top: 18px }
+.ctl .c-more summary { cursor: pointer; color: var(--dim); font-size: 13px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 10px }
+.ctl .c-more summary em { font-style: normal; color: var(--tx) }
+
+.ctl .c-table { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--panel) }
+.ctl .c-tr { display: grid; grid-template-columns: minmax(0, 1fr) 70px 70px 70px; gap: 10px; padding: 8px 13px; border-top: 1px solid var(--line); font-size: 13px }
+.ctl .c-tr:first-child { border-top: 0 }
+.ctl .c-tr span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--n32) }
+.ctl .c-tr span:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums }
+.ctl .c-tr.head { color: var(--faint); font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase }
+
+@keyframes c-pulse { 50% { opacity: 0.35 } }
+@media (prefers-reduced-motion: reduce) { .ctl .c-row.working .c-dot { animation: none } }
+@media (max-width: 900px) {
+  .ctl .c-grid { grid-template-columns: 1fr; padding: 14px 16px 0 }
+  .ctl .c-spans { padding: 0 16px 40px }
+  .ctl .c-top { flex-wrap: wrap; padding: 10px 16px }
+  .ctl .c-right { margin-left: 0 }
+  .ctl .c-row { grid-template-columns: 10px minmax(0, 1fr) auto }
+  .ctl .c-row .c-where { display: none }
+}
+
+/* drawer inside the brain map: a sheet over the stage, the graph still visible at its edge */
+#ctl-drawer {
+  position: fixed;
+  top: 51px;
+  right: 0;
+  bottom: 0;
+  width: min(1180px, calc(100vw - 80px));
+  z-index: 72; /* over the docked Claude panel (70), under the workbench rail (75) */
+  background: var(--n2);
+  border-left: 1px solid var(--n16);
+  box-shadow: -30px 0 60px rgba(0, 0, 0, 0.5);
+  overflow-y: auto;
+  transform: translateX(100%);
+  visibility: hidden;
+  transition: transform 0.22s ease, visibility 0s 0.22s;
+}
+#ctl-drawer.on { transform: none; visibility: visible; transition: transform 0.22s ease }
+#ctl-drawer .c-top { top: 0 }
+#ctl-drawer .c-close { font-size: 16px; line-height: 1; padding: 4px 10px }
+@media (max-width: 900px) { #ctl-drawer { width: 100vw; border-left: 0 } }
+@media (prefers-reduced-motion: reduce) { #ctl-drawer, #ctl-drawer.on { transition: none } }
+
+/* a card reached from the ring flashes once so the eye lands on it */
+.ctl .c-card.c-flash { animation: c-flash 1.6s ease-out }
+@keyframes c-flash { 0%, 30% { box-shadow: 0 0 0 2px var(--hot), 0 0 30px color-mix(in srgb, var(--acc) 35%, transparent) } 100% { box-shadow: none } }
+@media (prefers-reduced-motion: reduce) { .ctl .c-card.c-flash { animation: none; outline: 2px solid var(--hot) } }
+
+/* When they ran — sessions as spans on the folded clock (spanview.ts, timeaxis.ts).
+   Nothing here is a literal colour: the bars reuse the same state tokens as the cards,
+   so a bar and the card it points at can never disagree. */
+.ctl .c-spans { max-width: 1500px; margin: 0 auto; padding: 0 24px 60px }
+.ctl .c-spanhost { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); overflow-x: auto }
+.ctl .gx { display: block; min-width: 480px }
+.ctl .gx-break { fill: var(--bg); opacity: 0.55 }
+.ctl .gx-break-edge { stroke: var(--line); stroke-dasharray: 3 4 }
+.ctl .gx-grid { stroke: var(--line); opacity: 0.45 }
+.ctl .gx-grid.day { opacity: 0.9 }
+.ctl .gx-tick { fill: var(--dim); font-size: 10px; text-anchor: middle }
+.ctl .gx-tick.day { fill: var(--tx) }
+.ctl .gx-tick.quiet { fill: var(--faint) }
+.ctl .gx-lane { fill: var(--bg); opacity: 0.42 }
+.ctl .gx-lane-name { fill: var(--tx); font-size: 12px; font-weight: 500; text-anchor: end }
+.ctl .gx-lane-sub { fill: var(--faint); font-size: 10px; text-anchor: end }
+.ctl .gx-now { stroke: var(--hot); stroke-width: 1.5 }
+.ctl .gx-now-label { fill: var(--hot); font-size: 9px; letter-spacing: 0.1em; text-anchor: middle }
+
+.ctl .gx-bar { cursor: pointer }
+.ctl .gx-bar rect { fill: var(--faint); opacity: 0.8 }
+.ctl .gx-bar.needs-you rect { fill: var(--hot) }
+.ctl .gx-bar.blocked rect { fill: var(--warn) }
+.ctl .gx-bar.working rect { fill: var(--live) }
+/* ended and idle keep the default muted fill: a finished session is not a problem, and at bar
+   size the red the list uses for its 8px dot reads as one */
+.ctl .gx-bar.live rect { opacity: 0.95 }
+.ctl .gx-bar:hover rect { opacity: 1 }
+.ctl .gx-bar:focus-visible { outline: none }
+.ctl .gx-bar:focus-visible rect { stroke: var(--tx); stroke-width: 2 }
+/* the bar is the bright surface here, so its text takes the far end of the ramp */
+.ctl .gx-bar-label { fill: var(--n0); font-size: 11px }
+.ctl .gx-bar-dur { fill: var(--n0); font-size: 11px; opacity: 0.72; text-anchor: end }
+
+/* Listening — which local server is which project */
+.ctl .c-tr.ports { grid-template-columns: 78px minmax(0, 1fr) 46px 62px }
+.ctl .c-tr.ports .c-port { color: var(--live); font: 12px ui-monospace, Menlo, monospace; text-align: left }
+.ctl .c-tr.ports.head .c-port { color: var(--faint); font: inherit }
+.ctl .c-tr.ports span:nth-child(2) { text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--n32) }
+.ctl .c-tr.ports.self span:nth-child(2) { color: var(--dim) }
+.ctl .c-tr.ports em { font-style: normal; color: var(--faint) }
