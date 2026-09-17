@@ -9,6 +9,7 @@
     "1brain": "src/index.ts"
   },
   "dependencies": {
-    "@laika/core": "workspace:*"
+    "@laika/core": "workspace:*",
+    "@laika/mcp": "workspace:*"
   }
 }

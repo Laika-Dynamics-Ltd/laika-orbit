@@ -122,6 +122,12 @@ async function main() {
       )
       break
     }
+    case 'mcp': {
+      // the MCP server reads its corpus from BRAIN_ROOT, so --root carries over
+      process.env.BRAIN_ROOT = ROOT
+      await import('@laika/mcp')
+      break
+    }
     default:
       console.log(`1brain — deterministic, zero-token recall over a markdown knowledge base
 
@@ -130,6 +136,7 @@ async function main() {
   1brain lint               router-file diagnostics + dangling pointers
   1brain recall "<q>"       inspect retrieval (candidates, margin, evidence, cost)
   1brain ask "<q>"          emit the packed prompt only
+  1brain mcp                serve recall, get and status to Claude Code over stdio
 
   --root <dir>              the corpus to work on, for any command above
 

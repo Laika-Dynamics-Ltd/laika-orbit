@@ -48,6 +48,9 @@ brain/widgets/calendar.json
 .gauntlet/champion2/
 packages/graph/undefined/
 
+# built copy of the root LICENSE for the published 1brain package
+packages/1brain/LICENSE
+
 # written by the app for each user; the defaults apply until then
 brain/index.config.json
 brain/widgets/_settings.json

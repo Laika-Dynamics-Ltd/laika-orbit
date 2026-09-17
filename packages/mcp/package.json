@@ -5,6 +5,7 @@
   "license": "MIT",
   "author": "Laika Dynamics Limited",
   "type": "module",
+  "main": "src/index.ts",
   "dependencies": {
     "@laika/core": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.30.0",

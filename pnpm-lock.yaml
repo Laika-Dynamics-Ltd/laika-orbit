@@ -27,6 +27,22 @@ importers:
         specifier: ^3.2.4
         version: 3.2.7(@types/node@22.20.3)(lightningcss@1.33.0)
 
+  packages/1brain:
+    dependencies:
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.30.0
+        version: 1.30.0(zod@4.6.5)
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
+    devDependencies:
+      '@laika/cli':
+        specifier: workspace:*
+        version: link:../cli
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
+
   packages/app:
     dependencies:
       '@anthropic-ai/claude-agent-sdk':
@@ -66,6 +82,9 @@ importers:
       '@laika/core':
         specifier: workspace:*
         version: link:../core
+      '@laika/mcp':
+        specifier: workspace:*
+        version: link:../mcp
 
   packages/core: {}
 

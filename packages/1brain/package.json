@@ -1,0 +1,36 @@
+{
+  "name": "1brain",
+  "version": "0.1.0",
+  "description": "Zero-model recall over your files: the exact section that answers a question, in about a millisecond. CLI and MCP server for Claude Code.",
+  "license": "MIT",
+  "author": "Laika Dynamics Limited",
+  "homepage": "https://github.com/Laika-Dynamics-Ltd/laika-orbit/tree/main/packages/1brain#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Laika-Dynamics-Ltd/laika-orbit.git",
+    "directory": "packages/1brain"
+  },
+  "bugs": "https://github.com/Laika-Dynamics-Ltd/laika-orbit/issues",
+  "keywords": ["mcp", "claude-code", "retrieval", "knowledge-base", "second-brain", "rag", "cli"],
+  "type": "module",
+  "bin": {
+    "1brain": "dist/cli.js"
+  },
+  "files": ["dist", "README.md", "LICENSE"],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "smoke": "node smoke.mjs",
+    "prepack": "node build.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@laika/cli": "workspace:*",
+    "esbuild": "0.28.2"
+  }
+}

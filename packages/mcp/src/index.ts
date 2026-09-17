@@ -38,7 +38,7 @@ async function index(): Promise<BrainIndex> {
   return cached
 }
 
-const server = new McpServer({ name: 'laika-1brain', version: '0.1.0' })
+const server = new McpServer({ name: '1brain', version: '0.1.0' })
 
 server.registerTool(
   'recall',

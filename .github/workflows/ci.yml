@@ -49,6 +49,11 @@ jobs:
         if: '!cancelled()'
         run: node packages/cli/src/index.ts lint
 
+      # what npm users install: built, packed, installed into an empty project, driven over MCP
+      - name: 1brain package smoke
+        if: '!cancelled()'
+        run: pnpm --filter 1brain smoke
+
       # core is the IP and must stay dependency-free; this fails if that changes
       - name: core has zero runtime dependencies
         if: '!cancelled()'
