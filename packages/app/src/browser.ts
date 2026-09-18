@@ -12,6 +12,7 @@
  * In a plain browser there is no shell, and a web page cannot embed other sites (they
  * refuse to be framed), so the dock explains how to launch the shell instead.
  */
+import { atLeast, every } from './activity.ts'
 import './browser.css'
 import type {
   ChromeExtension,
@@ -134,6 +135,7 @@ export function createBrowser(host: BrowserHost): BrowserDock {
       <button class="wb-ib" type="button" data-act="find-next" title="Next (↵)">›</button>
       <button class="wb-ib" type="button" data-act="find-close" title="Done (esc)">×</button>
     </div>
+    <div class="wb-ask" data-el="ask" hidden role="alertdialog" aria-label="Permission request"></div>
     <div class="wb-sugg" data-el="sugg" hidden role="listbox"></div>
     <div class="wb-view" data-el="view"></div>
     <div class="wb-pop" data-el="pop" hidden role="menu"></div>
@@ -177,7 +179,11 @@ export function createBrowser(host: BrowserHost): BrowserDock {
   const tab = (op: string, args: Record<string, unknown> = {}) => shell?.tab(op, args)
 
   // ------------------------------------------------------------- open / close ----
-  function setOpen(on: boolean) {
+  /**
+   * `blank`: with no tabs, opening the browser starts a new tab. Not when the open is for a tab
+   * that is on its way (a link from Orbit, ⌘T): that made a blank tab too, and showed it.
+   */
+  function setOpen(on: boolean, blank = true) {
     if (on === open) return
     open = on
     root.classList.toggle('on', on)
@@ -186,7 +192,7 @@ export function createBrowser(host: BrowserHost): BrowserDock {
       localStorage.setItem('wb-open', on ? '1' : '')
     } catch {}
     if (on) {
-      if (inShell && state && state.tabs.length === 0) newTab(state.defaultProfile)
+      if (blank && inShell && state && state.tabs.length === 0) newTab(state.defaultProfile)
       reportBounds()
       startSampling()
       if (activeTab()?.url) tab('focus', { id: state?.active })
@@ -241,7 +247,7 @@ export function createBrowser(host: BrowserHost): BrowserDock {
    * page UI (spotlight, settings, a menu, the profiles panel, suggestions) that must show.
    */
   let covered = false
-  let sampleTimer: ReturnType<typeof setInterval> | null = null
+  let stopTicks: (() => void) | null = null
   let sampleRaf = 0
   function sample() {
     sampleRaf = 0
@@ -277,32 +283,73 @@ export function createBrowser(host: BrowserHost): BrowserDock {
     if (hit !== covered) {
       covered = hit
       shell.setCovered(hit)
+      if (!hit) clearFrames()
     }
   }
-  const scheduleSample = () => {
-    if (!sampleRaf) sampleRaf = requestAnimationFrame(sample)
+  /**
+   * While page UI covers the browser the shell takes the page off, so the dock draws a still of
+   * it (sent by the shell) under the menu instead of an empty area.
+   */
+  const framed = new Set<HTMLElement>()
+  function showFrames(frames: { tab: string; src: string }[]) {
+    if (!covered) return
+    for (const f of frames) {
+      const pane = viewEl.querySelector<HTMLElement>(
+        `.wb-pane[data-id="${CSS.escape(f.tab)}"] > .wb-pane-in`,
+      )
+      const into = pane ?? (f.tab === state?.active ? viewEl : null)
+      if (!into) continue
+      into.style.backgroundImage = `url("${f.src}")`
+      into.classList.add('wb-still')
+      framed.add(into)
+    }
   }
-  const mo = new MutationObserver(scheduleSample)
+  function clearFrames() {
+    for (const e of framed) {
+      e.style.backgroundImage = ''
+      e.classList.remove('wb-still')
+    }
+    framed.clear()
+  }
+  shell?.onFrames?.(showFrames)
+  const scheduleSample = () => {
+    // nothing of Orbit is on screen: nothing can be drawn over the browser either
+    if (!sampleRaf && !atLeast('hidden')) sampleRaf = requestAnimationFrame(sample)
+  }
+  // Any class or style change in the app can be a menu opening over the browser, so each one
+  // checks, but only while you are using Orbit: at idle or away the rail's widgets still tick
+  // (a check per change, six probes each) and nobody is opening menus; the timer covers toasts.
+  const mo = new MutationObserver(() => {
+    if (!atLeast('idle')) scheduleSample()
+  })
   function startSampling() {
     mo.observe(document.body, {
       subtree: true,
       attributes: true,
       attributeFilter: ['class', 'hidden', 'style', 'open'],
     })
-    sampleTimer = setInterval(() => {
-      reportBounds()
-      sample()
-    }, 300)
+    // the backstop for what the observers miss (a hover card, a CSS slide), through activity.ts:
+    // a quarter of the rate with another app in front, none while Orbit is hidden. It used to run
+    // every 300 ms whatever the level.
+    stopTicks = every(
+      300,
+      () => {
+        reportBounds()
+        sample()
+      },
+      { now: false },
+    )
     scheduleSample()
   }
   function stopSampling() {
     mo.disconnect()
-    if (sampleTimer) clearInterval(sampleTimer)
-    sampleTimer = null
+    stopTicks?.()
+    stopTicks = null
     // closed while page UI overlapped the view: clear it in the shell too, or the view stays
     // detached on the next open (sample() only reports changes)
     if (covered) shell?.setCovered(false)
     covered = false
+    clearFrames()
   }
 
   // ----------------------------------------------------------------- paint ----
@@ -312,6 +359,7 @@ export function createBrowser(host: BrowserHost): BrowserDock {
     paintView()
     reportBounds()
     paintDownload()
+    paintAsk()
     paintBookmarks()
     paintCount()
     if (!$('profiles').hidden) paintProfiles()
@@ -324,28 +372,51 @@ export function createBrowser(host: BrowserHost): BrowserDock {
     hbtn.classList.toggle('on', open)
   }
   const tabTitle = (t: ShellTab) => t.title || hostOf(t.url) || 'New tab'
+  /**
+   * The strip is updated in place, tab by tab, never rebuilt: state arrives many times a second
+   * while a page loads or a file downloads, and a rebuild between a press and its release threw
+   * the click away (half of them at 30 pushes a second). It also kept scrolling the strip back
+   * to the active tab; now that happens only when the active tab changes.
+   */
+  const tabEls = new Map<string, HTMLButtonElement>()
+  const tabHtml = new WeakMap<HTMLElement, string>()
+  let shownActive: string | null = null
   function paintTabs() {
-    strip.innerHTML = ''
-    if (!state) return
+    if (!state) {
+      strip.replaceChildren()
+      tabEls.clear()
+      return
+    }
+    const seen = new Set<string>()
+    let prev: Element | null = null
     for (const t of state.tabs) {
+      seen.add(t.id)
       const p = profileOf(t.profile)
-      const b = el('button', 'wb-tab')
-      b.type = 'button'
-      b.setAttribute('role', 'tab')
-      b.dataset.id = t.id
-      b.draggable = true
+      let b = tabEls.get(t.id)
+      if (!b) {
+        b = el('button', 'wb-tab')
+        b.type = 'button'
+        b.setAttribute('role', 'tab')
+        b.dataset.id = t.id
+        b.draggable = true
+        tabEls.set(t.id, b)
+      }
+      const at: Element | null = prev ? prev.nextElementSibling : strip.firstElementChild
+      if (at !== b) strip.insertBefore(b, at)
+      prev = b
       b.title = `${tabTitle(t)}\n${t.url ?? ''}\n${p?.name ?? ''}`
       b.style.setProperty('--pc', p?.colour ?? '#888')
       b.classList.toggle('on', t.id === state.active)
       b.classList.toggle('loading', t.loading)
       b.classList.toggle('sleeping', t.sleeping)
+      b.classList.toggle('down', isDown(t))
       // a split's two tabs sit together; the half not in charge of the toolbar is half-lit
       const sp = splitOf(t.id)
       b.classList.toggle('split', !!sp)
       b.classList.toggle('split-a', sp?.a === t.id)
       b.classList.toggle('split-b', sp?.b === t.id)
       b.classList.toggle('pair', !!sp && t.id !== state.active && sp === splitOf(state.active))
-      b.innerHTML = `<i class="wb-sep"></i>${
+      const html = `<i class="wb-sep"></i>${
         t.favicon && !t.loading
           ? `<img class="wb-fav" src="${esc(t.favicon)}" alt="" referrerpolicy="no-referrer"/>`
           : '<i class="wb-fav"></i>'
@@ -354,11 +425,22 @@ export function createBrowser(host: BrowserHost): BrowserDock {
           ? `<b class="wb-audio" data-x="mute" title="${t.muted ? 'Unmute' : 'Mute'} tab">${t.muted ? ICON.muted : ICON.audio}</b>`
           : ''
       }<span class="wb-x" data-x="close" title="Close (⌘W)">${ICON.x}</span>`
-      const img = b.querySelector('img')
-      if (img) img.onerror = () => img.replaceWith(el('i', 'wb-fav'))
-      strip.appendChild(b)
+      if (tabHtml.get(b) !== html) {
+        tabHtml.set(b, html)
+        b.innerHTML = html
+        const img = b.querySelector('img')
+        if (img) img.onerror = () => img.replaceWith(el('i', 'wb-fav'))
+      }
     }
-    strip.querySelector('.wb-tab.on')?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    for (const [id, b] of tabEls) {
+      if (seen.has(id)) continue
+      b.remove()
+      tabEls.delete(id)
+    }
+    if (state.active !== shownActive) {
+      shownActive = state.active
+      strip.querySelector('.wb-tab.on')?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    }
   }
   /** the profile's extension icons, for the active tab (their badges and popups follow it) */
   function paintActions() {
@@ -419,6 +501,8 @@ export function createBrowser(host: BrowserHost): BrowserDock {
     ;(root.querySelector('[data-act="fwd"]') as HTMLButtonElement).disabled =
       !t?.url || !t.canGoForward
   }
+  /** what the view area was last given for a page tab, so it is rewritten only on change */
+  let viewKey: string | null = null
   function paintView() {
     const t = activeTab()
     if (!inShell) {
@@ -434,13 +518,24 @@ export function createBrowser(host: BrowserHost): BrowserDock {
     }
     if (!state) return
     const sp = splitOf(t?.id)
-    if (sp) return paintSplit(sp)
+    if (sp) {
+      viewKey = 'split'
+      return paintSplit(sp)
+    }
     splitKey = ''
     if (t?.url) {
-      // the native view covers this; what is here shows only for a sleeping tab's instant
-      viewEl.innerHTML = t.sleeping ? `<div class="wb-waking">${esc(hostOf(t.url))}</div>` : ''
+      // the native view covers this; what is here shows only for a sleeping tab's instant, or
+      // for a page that crashed or hung (its view is taken off)
+      const html = isDown(t)
+        ? downCard(t)
+        : t.sleeping
+          ? `<div class="wb-waking">${esc(hostOf(t.url))}</div>`
+          : ''
+      // written only when it changes: a rewrite mid-click would lose the click on Reload
+      if (html !== viewKey) viewEl.innerHTML = viewKey = html
       return
     }
+    viewKey = 'start'
     const p = t ? profileOf(t.profile) : null
     const recent = state.history.filter((h) => !t || h.profile === t.profile).slice(0, 9)
     const others = state.profiles
@@ -472,6 +567,25 @@ export function createBrowser(host: BrowserHost): BrowserDock {
       <div class="wb-hint">Type above to search or open a site · <kbd>⌘T</kbd> new tab · <kbd>⌘⇧T</kbd> new tab in a profile · <kbd>⇧⌥T</kbd> reopen a closed tab · <kbd>⌘⇧B</kbd> hide the browser</div>
     </div>`
   }
+  /** where a crashed or hung page was: what happened, and a reload that only touches this tab */
+  const downCard = (x: ShellTab) => {
+    const why =
+      x.gone === 'oom'
+        ? 'ran out of memory'
+        : x.gone === 'killed'
+          ? 'was ended'
+          : x.gone
+            ? 'crashed'
+            : 'isn’t responding'
+    return `<div class="wb-down" data-id="${esc(x.id)}">
+      <b>${esc(hostOf(x.url) || 'This page')} ${why}</b>
+      <p>${x.hung ? 'It may come back on its own. Reloading starts it again.' : 'Only this tab is affected. Reloading starts it again where it was.'}</p>
+      <div><button type="button" class="wb-xbtn add" data-act="revive">Reload</button>${
+        x.hung ? '<button type="button" class="wb-xbtn" data-act="wait">Wait</button>' : ''
+      }</div>
+    </div>`
+  }
+  const isDown = (x: ShellTab | null | undefined) => !!x && (!!x.gone || !!x.hung)
   /**
    * Two panes and a divider. The shell draws each tab's page inside its pane's frame; a pane
    * with no page yet offers the open tabs to fill it.
@@ -484,7 +598,12 @@ export function createBrowser(host: BrowserHost): BrowserDock {
     const pane = (id: string) => {
       const x = tabsById.get(id)
       let body = ''
-      if (x?.url) body = x.sleeping ? `<div class="wb-waking">${esc(hostOf(x.url))}</div>` : ''
+      if (x?.url)
+        body = isDown(x)
+          ? downCard(x)
+          : x.sleeping
+            ? `<div class="wb-waking">${esc(hostOf(x.url))}</div>`
+            : ''
       else
         body = `<div class="wb-pick">
           <h3>Choose a tab for this side</h3>
@@ -512,7 +631,7 @@ export function createBrowser(host: BrowserHost): BrowserDock {
       state.active,
       [sp.a, sp.b].map((id) => {
         const x = tabsById.get(id)
-        return [x?.url, x?.sleeping]
+        return [x?.url, x?.sleeping, x?.gone, x?.hung]
       }),
       [sp.a, sp.b].some((id) => !tabsById.get(id)?.url) &&
         free.map((f) => [f.id, f.title, f.favicon]),
@@ -525,6 +644,23 @@ export function createBrowser(host: BrowserHost): BrowserDock {
     }
     viewEl.querySelector<HTMLElement>('.wb-split')?.style.setProperty('--r', String(sp.ratio))
     reportBounds()
+  }
+  /**
+   * A page asking for the camera, the microphone, your location…: a bar above that page, as in
+   * Chrome, instead of a sheet over all of Orbit. The view area shrinks to make room for it.
+   */
+  let askKey = ''
+  function paintAsk() {
+    const box = $('ask')
+    const a = activeTab()?.ask
+    const key = a ? `${state?.active}|${a.origin}|${a.what}` : ''
+    if (key === askKey) return
+    askKey = key
+    box.hidden = !a
+    if (!a) return
+    box.innerHTML = `<span>${a.text ? esc(a.text) : `<b>${esc(hostOf(a.origin))}</b> wants to ${esc(a.what)}`}</span>
+      <button type="button" class="wb-xbtn add" data-act="permit-allow">${esc(a.yes ?? 'Allow')}</button>
+      <button type="button" class="wb-xbtn" data-act="permit-block">${esc(a.no ?? 'Block')}</button>`
   }
   /** the toolbar pill: what is downloading, or what just finished; a plain icon otherwise */
   function paintDownload() {
@@ -545,7 +681,7 @@ export function createBrowser(host: BrowserHost): BrowserDock {
       dlBtn.textContent = `${d.state === 'completed' ? '✓' : '✕'} ${d.name}`
     } else dlBtn.textContent = '↓'
     dlBtn.classList.toggle('idle', !running.length && !fresh)
-    dlBtn.title = 'Downloads (⌥⌘L)'
+    dlBtn.title = 'Downloads (⇧⌘J)'
   }
   const size = (n: number) =>
     n < 1024
@@ -926,6 +1062,12 @@ export function createBrowser(host: BrowserHost): BrowserDock {
     closeEditor(true)
   })
 
+  // the shell's browser keys (⌘W, ⌘F, ⌘R …) act on the browser only while the keyboard is in it
+  root.addEventListener('focusin', () => shell?.setDockFocus?.(true))
+  root.addEventListener('focusout', (e) => {
+    if (!root.contains(e.relatedTarget as Node | null)) shell?.setDockFocus?.(false)
+  })
+
   // ------------------------------------------------------------------ menus ----
   type PopItem = {
     label: string
@@ -990,7 +1132,7 @@ export function createBrowser(host: BrowserHost): BrowserDock {
   // ---------------------------------------------------------------- actions ----
   async function newTab(profile: string, url?: string) {
     if (!shell) return
-    setOpen(true)
+    setOpen(true, false)
     await tab('open', { profile, url: url ?? null })
     if (!url) {
       editing = false
@@ -1212,6 +1354,15 @@ export function createBrowser(host: BrowserHost): BrowserDock {
         closeEditor(false)
         return void (ed && shell?.bookmark?.('remove', ed))
       }
+      case 'revive':
+      case 'wait': {
+        // the card's own tab, which in a split may not be the active one
+        const id = target.closest<HTMLElement>('.wb-down[data-id]')?.dataset.id ?? t?.id
+        return void tab(act === 'revive' ? 'reload' : 'wait', { id })
+      }
+      case 'permit-allow':
+      case 'permit-block':
+        return void tab('permit', { id: t?.id, allow: act === 'permit-allow' })
       case 'zoom-reset':
         return void tab('zoom', { id: t?.id, dir: 0 })
       case 'dls-close':
@@ -1296,9 +1447,10 @@ export function createBrowser(host: BrowserHost): BrowserDock {
     e.preventDefault()
     tab('menu', { id: b.dataset.id })
   })
-  // double-click the empty strip for a new tab, as in Chrome
-  strip.addEventListener('dblclick', (e) => {
-    if ((e.target as HTMLElement).closest('.wb-tab')) return
+  // double-click the empty row for a new tab, as in Chrome (the strip hugs its tabs, so the
+  // empty part is mostly the row past "+")
+  root.querySelector('.wb-tabs')!.addEventListener('dblclick', (e) => {
+    if ((e.target as HTMLElement).closest('.wb-tab, .wb-new')) return
     newTab(activeTab()?.profile ?? state?.defaultProfile ?? '')
   })
   strip.addEventListener('auxclick', (e) => {
@@ -1418,28 +1570,48 @@ export function createBrowser(host: BrowserHost): BrowserDock {
     })
     shell.onCommand((c) => {
       switch (c.cmd) {
+        // the shell is opening a tab (a link from Orbit, an extension): no blank one as well
         case 'open':
-          return setOpen(true)
+          return setOpen(true, false)
         case 'toggle':
           return toggle()
         case 'focus-omnibox':
-          setOpen(true)
+          setOpen(true, false)
           editing = false
           urlIn.focus()
           return
         case 'find':
           return showFind()
         case 'downloads':
-          setOpen(true)
+          setOpen(true, false)
           return showDownloads(true)
         case 'bookmark-edit':
-          setOpen(true)
+          setOpen(true, false)
           return void editBookmark(c.id)
         case 'spotlight':
           return host.spotlight()
         case 'pick-profile':
-          setOpen(true)
+          setOpen(true, false)
           return profileMenu(root.querySelector('[data-act="new"]')!, null)
+        case 'key': {
+          // one of Orbit's own keys, pressed inside a web page: played to the app as if pressed
+          // here, with nothing of the browser's holding focus (the window keys skip text fields)
+          const a = document.activeElement as HTMLElement | null
+          if (a && root.contains(a)) a.blur()
+          document.body.dispatchEvent(
+            new KeyboardEvent('keydown', {
+              code: c.code ?? '',
+              key: c.key ?? '',
+              altKey: !!c.alt,
+              metaKey: !!c.meta,
+              ctrlKey: !!c.ctrl,
+              shiftKey: !!c.shift,
+              bubbles: true,
+              cancelable: true,
+            }),
+          )
+          return
+        }
       }
     })
     shell.state().then((s) => {

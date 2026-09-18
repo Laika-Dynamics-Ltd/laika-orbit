@@ -73,9 +73,11 @@ function otherLocalApp(url) {
 }
 
 /** A fresh browser context (empty localStorage) on the app, past the boot overlay. */
-export async function openApp({ width = 1600, height = 950 } = {}) {
+export async function openApp({ width = 1600, height = 950, init = null } = {}) {
   const browser = await chromium.launch()
   const context = await browser.newContext({ viewport: { width, height } })
+  // a script to run in the page before the app's own (e.g. a stand-in for the desktop shell)
+  if (init) await context.addInitScript(init)
   const page = await context.newPage()
   // generous: the suite runs beside indexing, other sessions and dev servers
   page.setDefaultTimeout(60_000)

@@ -13,9 +13,9 @@
  * Starts the app server if nothing is listening on APP_URL (default :5200).
  */
 import { spawn } from 'node:child_process'
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, dirname, extname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -37,6 +37,9 @@ import {
 import { ElectronChromeExtensions } from 'electron-chrome-extensions'
 import { installChromeWebStore, installExtension, uninstallExtension } from 'electron-chrome-web-store'
 import { chromeProfiles } from './chrome-profiles.mjs'
+import { orbitKey } from './orbit-keys.mjs'
+import { readState } from './state-file.mjs'
+import { publicTab } from './tab-state.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 // Inside the .app built by make-app.mjs, repo.json says where the checkout is and which node
@@ -60,6 +63,24 @@ const SERVER = REPO ? join(REPO.root, 'packages/app/server.mjs') : resolve(HERE,
 const NODE = REPO?.node ?? 'node'
 const SEARCH = process.env.SHELL_SEARCH ?? 'https://www.google.com/search?q=%s'
 const SMOKE = process.env.LAIKA_SHELL_SMOKE // a directory: run the self-test and write screenshots there
+/**
+ * LAIKA_SHELL_HIDDEN=1: a test copy that stays out of your way, yet still draws (so CDP
+ * screenshots and a remote-debugging driver work). Every window it makes is fully transparent,
+ * lets every click through, can never take focus and stays out of Mission Control; there is no
+ * Dock icon and no pop-out comes back. (Moving the window off screen is not enough: macOS puts
+ * it back on screen, which is how an earlier version kept appearing over your work.) Pair it
+ * with LAIKA_SHELL_USER_DATA and PORT.
+ */
+const HIDDEN = process.env.LAIKA_SHELL_HIDDEN === '1'
+if (HIDDEN) {
+  app.commandLine.appendSwitch('disable-backgrounding-occluded-windows')
+  app.on('browser-window-created', (_e, w) => {
+    w.setOpacity(0)
+    w.setIgnoreMouseEvents(true)
+    w.setFocusable(false)
+    w.setHiddenInMissionControl?.(true)
+  })
+}
 // one Chrome-looking UA for every profile: Google's sign-in refuses anything that says "Electron"
 const UA = `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${process.versions.chrome} Safari/537.36`
 const COLOURS = ['#5b9dff', '#ff7a45', '#3ddc97', '#c07bff', '#ffc94f', '#ff4f9d', '#4fe0e0', '#a3d15c']
@@ -98,7 +119,8 @@ const permissionMemo = new Map()
 
 async function loadStore() {
   try {
-    const raw = JSON.parse(await readFile(STATE_FILE, 'utf8'))
+    const raw = await readState(STATE_FILE)
+    if (!raw) throw new Error('no saved state')
     store = { ...store, ...raw }
     // tabs come back asleep: no renderer until one is activated
     for (const t of raw.tabs ?? []) {
@@ -143,11 +165,19 @@ function storeData() {
   }
 }
 let saveTimer = null
+let saving = null // the write in flight; another waits for it rather than racing it
 function save() {
   clearTimeout(saveTimer)
   saveTimer = setTimeout(async () => {
-    await mkdir(dirname(STATE_FILE), { recursive: true })
-    await writeFile(STATE_FILE, JSON.stringify(storeData(), null, 2))
+    await saving
+    saving = (async () => {
+      const tmp = `${STATE_FILE}.tmp`
+      await mkdir(dirname(STATE_FILE), { recursive: true })
+      await writeFile(tmp, JSON.stringify(storeData(), null, 2))
+      await rename(tmp, STATE_FILE)
+    })().catch((e) => console.error('saving browser.json:', e?.message))
+    await saving
+    saving = null
   }, 400)
 }
 
@@ -168,6 +198,8 @@ const blankTab = (profile, url = null, title = '') => ({
   view: null,
   heard: false, // you let this page play sound (it started while shown, or you unmuted it)
   sleepTimer: null, // suspends the tab once it has been out of view for SLEEP_AFTER_MS
+  gone: null, // why its page crashed or was ended (render-process-gone), until reloaded
+  hung: false, // its page stopped answering
 })
 const tabOf = (id) => tabs.find((t) => t.id === id)
 const activeTab = () => tabOf(active)
@@ -177,10 +209,9 @@ function snapshot() {
   return {
     profiles: store.profiles,
     defaultProfile: store.defaultProfile,
-    tabs: tabs.map((t) => {
-      const { view, nav, ...rest } = t
-      return { ...rest, sleeping: !!t.url && !view, wcId: view?.webContents.id ?? null, canGoBack: canStep(t, -1), canGoForward: canStep(t, 1) }
-    }),
+    tabs: tabs.map((t) =>
+      publicTab(t, { sleeping: !!t.url && !t.view, wcId: t.view?.webContents.id ?? null, canGoBack: canStep(t, -1), canGoForward: canStep(t, 1) }),
+    ),
     active,
     splits,
     history: store.history.slice(0, 120),
@@ -217,6 +248,9 @@ function sessionFor(profileId) {
       const key = `${profileId}|${origin}|${permission}`
       if (permissionMemo.has(key)) return cb(permissionMemo.get(key))
       const what = { media: 'use your camera or microphone', geolocation: 'know your location', 'display-capture': 'record your screen', midi: 'use MIDI devices', midiSysex: 'use MIDI devices', openExternal: 'open another app' }[permission]
+      // a tab asks in its own bar above the page; a sheet over the window blocked all of Orbit
+      const t = tabs.find((x) => x.view?.webContents === wc)
+      if (t) return askInTab(t, { key, origin, what }, cb)
       dialog
         .showMessageBox(win, { type: 'question', buttons: ['Allow', 'Block'], defaultId: 1, cancelId: 1, message: `${origin} wants to ${what}`, detail: `Profile: ${profileOf(profileId)?.name ?? profileId}` })
         .then(({ response }) => {
@@ -265,6 +299,29 @@ function sessionFor(profileId) {
   // extensions must know the session before any tab in it exists
   extensionsFor(profileId)
   return ses
+}
+/**
+ * A page's permission request, asked in its tab: the dock shows a bar above the page with Allow
+ * and Block (tab op 'permit'). Requests queue per tab; leaving the page or closing the tab
+ * blocks whatever is still waiting.
+ */
+function askInTab(t, { key, origin, what, text = null, yes = null, no = null, remember = true }, cb) {
+  t.asks ??= []
+  const same = t.asks.find((a) => a.key === key)
+  if (same) same.cbs.push(cb)
+  else t.asks.push({ key, origin, what, text, yes, no, remember, cbs: [cb] })
+  push()
+}
+function answerAsk(t, allow) {
+  const a = t?.asks?.shift()
+  if (!a) return
+  if (a.remember) permissionMemo.set(a.key, allow)
+  for (const cb of a.cbs) cb(allow)
+  push()
+}
+function dropAsks(t) {
+  for (const a of t.asks ?? []) for (const cb of a.cbs) cb(false)
+  t.asks = []
 }
 /** all running downloads as one bar on the Dock icon */
 function dockProgress() {
@@ -331,7 +388,8 @@ function layout() {
   const panes = s && bounds?.panes?.[s.a] && bounds.panes[s.b] ? bounds.panes : null
   const shown = panes ? [tabOf(s.a), tabOf(s.b)] : t ? [t] : []
   for (const x of tabs) if (!shown.includes(x)) detach(x)
-  for (const x of shown) if (x.url && !x.view) wake(x)
+  // a crashed tab stays down until you reload it
+  for (const x of shown) if (x.url && !x.view && !x.gone) wake(x)
   if (fullscreenTab && shown.includes(fullscreenTab) && fullscreenTab.view) {
     for (const x of shown) if (x !== fullscreenTab) detach(x)
     attach(fullscreenTab)
@@ -341,7 +399,7 @@ function layout() {
   }
   for (const x of shown) {
     if (!x.view) continue
-    if (!bounds || covered) {
+    if (!bounds || covered || x.gone || x.hung) {
       detach(x)
       continue
     }
@@ -480,8 +538,25 @@ function wake(t) {
     t.loading = false
     push()
   })
+  // A page with unsaved changes (a beforeunload guard) used to swallow a new address, a reload or
+  // back without a word. Now its tab asks, in the bar above it; Leave does what you asked.
+  wc.on('will-prevent-unload', (e) => {
+    if (t.leaveOK) {
+      t.leaveOK = false
+      e.preventDefault() // go anyway
+      return
+    }
+    const retry = t.retry
+    t.url = wc.getURL() // it stayed: the address bar says so
+    askInTab(t, { key: `leave|${t.id}`, origin: safeOrigin(t.url), what: 'leave', text: 'This page has changes that may not be saved. Leave it?', yes: 'Leave', no: 'Stay', remember: false }, (ok) => {
+      if (!ok || !retry) return
+      t.leaveOK = true
+      retry()
+    })
+  })
   wc.on('did-navigate', (_e, url) => {
     if (url.startsWith('data:')) return // our own error page keeps the address it failed on
+    if (t.asks?.length) dropAsks(t) // a question from the page you left
     t.heard = false // a new page has to be started again to play in the background
     t.url = url
     t.failed = null
@@ -503,8 +578,26 @@ function wake(t) {
     wc.loadURL(errorPage(url, desc, code))
     push()
   })
+  // a page that crashes, or stops answering, breaks its own tab and nothing else: the tab
+  // shows a card with a reload where the page was (the dead view is taken off)
   wc.on('render-process-gone', (_e, d) => {
-    t.failed = { code: 0, desc: `The page crashed (${d.reason})`, url: t.url }
+    if (t.view !== view || d.reason === 'clean-exit') return
+    t.gone = d.reason
+    t.hung = false
+    t.loading = false
+    layout()
+    push()
+  })
+  wc.on('unresponsive', () => {
+    if (t.view !== view) return
+    t.hung = true
+    layout()
+    push()
+  })
+  wc.on('responsive', () => {
+    if (t.view !== view || !t.hung) return
+    t.hung = false
+    layout()
     push()
   })
   // Electron 44 emits a single event object carrying `.audible`; older builds passed the
@@ -540,13 +633,24 @@ function wake(t) {
     // the page's palette, from anywhere
     if (mod && !input.shift && input.key.toLowerCase() === 'k') {
       e.preventDefault()
+      // the palette covers the dock; when it closes the keyboard comes back here
+      refocusTab = true
       win.webContents.focus()
       cmd('spotlight')
+    }
+    // Orbit's own keys (the window system, the panel chords, the workspaces) belong to Orbit
+    // wherever you are; a web page used to swallow them
+    if (orbitKey(input)) {
+      e.preventDefault()
+      win.webContents.focus()
+      cmd('key', { code: input.code, key: input.key, alt: input.alt, meta: input.meta, ctrl: input.control, shift: input.shift })
+      return
     }
     if (input.key === 'Escape' && t.loading) wc.stop()
   })
   wc.on('destroyed', () => {
-    t.view = null
+    // a revived tab has a new view by now; only this one's own going clears it
+    if (t.view === view) t.view = null
   })
   wc.setVisualZoomLevelLimits(1, 3) // trackpad pinch zooms the page, as in Chrome
   const kept = t.nav
@@ -603,7 +707,10 @@ function canStep(t, dir) {
 /** back or forward in a tab; a sleeping tab steps through its kept history and wakes there */
 function goTab(t, dir) {
   if (!t) return
-  if (t.view) return go(t.view.webContents, dir)
+  if (t.view) {
+    t.retry = () => goTab(t, dir)
+    return go(t.view.webContents, dir)
+  }
   if (!canStep(t, dir)) return
   t.nav.index += dir
   t.url = t.nav.entries[t.nav.index].url
@@ -670,11 +777,50 @@ function applyZoom(t) {
   if (wc && Math.abs(wc.getZoomFactor() - want) > 0.001) wc.setZoomFactor(want)
   t.zoom = want
 }
+/**
+ * A crashed or hung page starts again in a fresh renderer, where it was, with its back and
+ * forward history. A hung renderer is ended first (if other tabs of the same site share it,
+ * they get their own reload card).
+ */
+function reviveTab(t) {
+  const old = t.view
+  try {
+    t.nav = tabHistory(t)
+  } catch {
+    t.nav = null
+  }
+  const wasHung = t.hung
+  t.gone = null
+  t.hung = false
+  t.failed = null
+  if (old) {
+    detach(t)
+    clearTimeout(t.sleepTimer)
+    t.sleepTimer = null
+    t.view = null
+    const wc = old.webContents
+    if (!wc.isDestroyed()) {
+      if (wasHung) wc.forcefullyCrashRenderer()
+      wc.close()
+    }
+  }
+  layout()
+  push()
+}
+/** "Wait" on a hung page: show it again, and ask again if it is still stuck later */
+function waitTab(t) {
+  if (!t?.hung) return
+  t.hung = false
+  layout()
+  push()
+}
 /** a tab showing our error page retries the address that failed instead of reloading the error page */
 function reloadTab(t, hard = false) {
   const wc = t?.view?.webContents
   if (!t) return
+  if (t.gone || t.hung) return reviveTab(t)
   if (t.failed) return nav(t.id, t.url)
+  t.retry = () => reloadTab(t, hard)
   return hard ? wc?.reloadIgnoringCache() : wc?.reload()
 }
 
@@ -716,6 +862,7 @@ function closeTab(id) {
   if (partner) splits = splits.filter((x) => x.a !== id && x.b !== id)
   if (t.url) closed.unshift({ profile: t.profile, url: t.url, title: t.title, index: i, nav: tabHistory(t) })
   tabs.splice(i, 1)
+  dropAsks(t)
   closed = closed.slice(0, 20)
   detach(t)
   clearTimeout(t.sleepTimer)
@@ -737,6 +884,7 @@ function nav(id, text) {
   if (!t) return
   t.url = toUrl(text)
   t.failed = null
+  t.retry = () => nav(id, text)
   if (t.view) t.view.webContents.loadURL(t.url)
   layout() // wakes a sleeping or brand-new tab
   t.view?.webContents.focus()
@@ -1141,12 +1289,53 @@ ipcMain.on('shell:bounds', (_e, rect) => {
   layout()
   if (wasOpen !== (bounds !== null)) push() // dockOpen is part of the snapshot
 })
-ipcMain.on('shell:covered', (_e, on) => {
-  if (covered === on) return
+/** a web tab had the keyboard when page UI covered the dock: it gets it back when that goes */
+let refocusTab = false
+const tabHasFocus = () => {
+  const f = webContents.getFocusedWebContents()
+  return !!f && tabs.some((t) => t.view?.webContents === f)
+}
+/** the page says whether its keyboard focus is inside the browser dock (address bar, find, …) */
+let dockFocus = false
+ipcMain.on('shell:dock-focus', (_e, on) => {
+  dockFocus = !!on
+})
+/**
+ * The keyboard is in the browser: a web tab, or the dock's own toolbar. Browser keys (⌘W, ⌘F,
+ * ⌘R, ⌘[ …) act on the browser only then; typing in a chat beside it, ⌘W used to close the tab.
+ */
+const inBrowser = () => bounds !== null && (tabHasFocus() || (dockFocus && webContents.getFocusedWebContents() === win?.webContents))
+/**
+ * Page UI over the dock takes the native views off (they would paint over it), which left the
+ * browser blank under even a small menu. So first each page on show is captured, and the dock
+ * draws that still under the menu until it goes; the capture holds the menu back a frame or two.
+ */
+async function sendFrames() {
+  const shown = tabs.filter((t) => shownNow(t))
+  const frames = await Promise.all(
+    shown.map(async (t) => {
+      const img = await t.view.webContents.capturePage().catch(() => null)
+      return img && !img.isEmpty() ? { tab: t.id, src: `data:image/jpeg;base64,${img.toJPEG(82).toString('base64')}` } : null
+    }),
+  )
+  win?.webContents.send('shell:frames', frames.filter(Boolean))
+}
+let wantCovered = false
+ipcMain.on('shell:covered', async (_e, on) => {
+  if (wantCovered === on) return
+  wantCovered = on
+  if (on) {
+    refocusTab ||= tabHasFocus()
+    await sendFrames()
+    // uncovered while the capture ran: nothing to step aside for
+    if (!wantCovered) return
+  }
   covered = on
   layout()
-  // the page keeps focus while its own UI is up; hand it back to the tab afterwards
-  if (!on) activeTab()?.view?.webContents.focus()
+  // Only a tab that had focus gets it back. A tooltip or toast passing over the browser while
+  // you type in a chat used to move the keyboard into the web page.
+  if (!on && refocusTab) activeTab()?.view?.webContents.focus()
+  if (!on) refocusTab = false
 })
 ipcMain.handle('shell:tab', (_e, a) => {
   const t = tabOf(a.id)
@@ -1168,6 +1357,10 @@ ipcMain.handle('shell:tab', (_e, a) => {
       return goTab(t, 1)
     case 'reload':
       return reloadTab(t, a.hard)
+    case 'wait':
+      return waitTab(t)
+    case 'permit':
+      return answerAsk(t, !!a.allow)
     case 'menu':
       return t && tabMenu(t)
     case 'stop':
@@ -1293,11 +1486,11 @@ function buildMenu() {
         { label: 'New Tab in Profile…', accelerator: 'CmdOrCtrl+Shift+T', click: dockCmd('pick-profile') },
         { label: 'Reopen Closed Tab', accelerator: 'Shift+Alt+T', click: dockCmd(null, reopenTab) },
         { label: 'Reopen Closed Tab', accelerator: 'CmdOrCtrl+Shift+Z', visible: false, click: dockCmd(null, reopenTab) },
-        { label: 'Close Tab', accelerator: 'CmdOrCtrl+W', click: () => bounds !== null && active && closeTab(active) },
+        { label: 'Close Tab', accelerator: 'CmdOrCtrl+W', click: () => inBrowser() && active && closeTab(active) },
         { type: 'separator' },
         { label: 'Open Location…', accelerator: 'CmdOrCtrl+L', click: dockCmd('focus-omnibox') },
-        { label: 'Find…', accelerator: 'CmdOrCtrl+F', click: () => bounds !== null && cmd('find') },
-        { label: 'Bookmark This Tab…', accelerator: 'CmdOrCtrl+D', click: () => bounds !== null && activeTab()?.url && cmd('bookmark-edit') },
+        { label: 'Find…', accelerator: 'CmdOrCtrl+F', click: () => inBrowser() && cmd('find') },
+        { label: 'Bookmark This Tab…', accelerator: 'CmdOrCtrl+D', click: () => inBrowser() && activeTab()?.url && cmd('bookmark-edit') },
         { type: 'separator' },
         { role: 'close', accelerator: 'CmdOrCtrl+Shift+W' },
       ],
@@ -1311,24 +1504,26 @@ function buildMenu() {
       submenu: [
         { label: 'Toggle Browser', accelerator: 'CmdOrCtrl+Shift+B', click: () => cmd('toggle') },
         { type: 'separator' },
-        { label: 'Reload', accelerator: 'CmdOrCtrl+R', click: () => (bounds !== null && activeTab()?.url ? reloadTab(activeTab()) : win?.webContents.reload()) },
-        { label: 'Reload Ignoring Cache', accelerator: 'CmdOrCtrl+Shift+R', click: () => bounds !== null && reloadTab(activeTab(), true) },
-        { label: 'Stop', accelerator: 'CmdOrCtrl+.', click: () => wcActive()?.stop() },
+        // outside the browser, ⌘R reloads Orbit, as it does with the browser closed
+        { label: 'Reload', accelerator: 'CmdOrCtrl+R', click: () => (inBrowser() && activeTab()?.url ? reloadTab(activeTab()) : bounds === null || !inBrowser() ? win?.webContents.reload() : null) },
+        { label: 'Reload Ignoring Cache', accelerator: 'CmdOrCtrl+Shift+R', click: () => inBrowser() && reloadTab(activeTab(), true) },
+        { label: 'Stop', accelerator: 'CmdOrCtrl+.', click: () => inBrowser() && wcActive()?.stop() },
         { type: 'separator' },
         // only while the dock shows: a hidden tab must not move under you
-        { label: 'Back', accelerator: 'CmdOrCtrl+[', click: () => bounds !== null && goTab(activeTab(), -1) },
-        { label: 'Forward', accelerator: 'CmdOrCtrl+]', click: () => bounds !== null && goTab(activeTab(), 1) },
+        { label: 'Back', accelerator: 'CmdOrCtrl+[', click: () => inBrowser() && goTab(activeTab(), -1) },
+        { label: 'Forward', accelerator: 'CmdOrCtrl+]', click: () => inBrowser() && goTab(activeTab(), 1) },
         { type: 'separator' },
         { label: 'Actual Size', accelerator: 'CmdOrCtrl+0', click: () => zoomFocused(0) },
         { label: 'Zoom In', accelerator: 'CmdOrCtrl+=', click: () => zoomFocused(1) },
         { label: 'Zoom In', accelerator: 'CmdOrCtrl+Plus', visible: false, click: () => zoomFocused(1) },
         { label: 'Zoom Out', accelerator: 'CmdOrCtrl+-', click: () => zoomFocused(-1) },
         { type: 'separator' },
-        { label: 'Split View', accelerator: 'CmdOrCtrl+\\', click: () => bounds !== null && activeTab() && (splitOf(active) ? unsplit(active) : splitTab(activeTab())) },
-        { label: 'Downloads', accelerator: 'Alt+CmdOrCtrl+L', click: dockCmd('downloads') },
+        { label: 'Split View', accelerator: 'CmdOrCtrl+\\', click: () => inBrowser() && activeTab() && (splitOf(active) ? unsplit(active) : splitTab(activeTab())) },
+        // ⇧⌘J: ⌥⌘L, Chrome's own, is the Cockpit panel's in Orbit
+        { label: 'Downloads', accelerator: 'Shift+CmdOrCtrl+J', click: dockCmd('downloads') },
         { label: 'Always Show Bookmarks Bar', type: 'checkbox', checked: store.bookmarkBar, click: () => setBookmarkBar(!store.bookmarkBar) },
         { type: 'separator' },
-        { label: 'Developer Tools', accelerator: 'Alt+CmdOrCtrl+I', click: () => (bounds !== null && wcActive() ? wcActive() : win?.webContents)?.toggleDevTools() },
+        { label: 'Developer Tools', accelerator: 'Alt+CmdOrCtrl+I', click: () => (inBrowser() && wcActive() ? wcActive() : win?.webContents)?.toggleDevTools() },
         { role: 'togglefullscreen' },
       ],
     },
@@ -1512,6 +1707,8 @@ async function createWindow() {
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 16, y: 18 },
     show: false,
+    // the hidden test copy: never drawn over your screen, never focused (see HIDDEN)
+    ...(HIDDEN ? { opacity: 0, focusable: false, hiddenInMissionControl: true } : {}),
     webPreferences: {
       preload: join(HERE, 'preload.cjs'),
       sandbox: true,
@@ -1519,11 +1716,20 @@ async function createWindow() {
       nodeIntegration: false,
     },
   })
-  win.once('ready-to-show', () => win.show())
+  win.once('ready-to-show', () => (HIDDEN ? win.showInactive() : win.show()))
   guardPage(win)
   win.on('resize', layout)
   // trackpad swipes (macOS) and mouse back/forward buttons (Windows, Linux) move the open tab
-  const swipe = (dir) => bounds !== null && !covered && goTab(activeTab(), dir)
+  // only with the pointer over the web page: a swipe over a chat beside it is not for the page
+  const overDock = () => {
+    if (!bounds || !win) return false
+    const p = screen.getCursorScreenPoint()
+    const c = win.getContentBounds()
+    const x = p.x - c.x
+    const y = p.y - c.y
+    return x >= bounds.x && x < bounds.x + bounds.width && y >= bounds.y && y < bounds.y + bounds.height
+  }
+  const swipe = (dir) => bounds !== null && !covered && overDock() && goTab(activeTab(), dir)
   win.on('swipe', (_e, d) => (d === 'left' ? swipe(-1) : d === 'right' ? swipe(1) : null))
   win.on('app-command', (_e, c) => (c === 'browser-backward' ? swipe(-1) : c === 'browser-forward' ? swipe(1) : null))
   win.on('closed', () => {
@@ -1542,11 +1748,43 @@ async function createWindow() {
   await win.loadURL(APP_URL)
   if (store.appZoom && store.appZoom !== 1) win.webContents.setZoomFactor(store.appZoom)
   // the parts you had popped out come back on the screens you left them on
-  for (const part of Object.keys(store.popouts ?? {})) openPopout(part)
+  if (!HIDDEN) for (const part of Object.keys(store.popouts ?? {})) openPopout(part)
   if (SMOKE) smoke().catch((e) => console.error('smoke failed', e))
 }
 
+// the hidden test copy can be driven from its inspector (--inspect=<port>): globalThis.__shell
+if (HIDDEN) {
+  globalThis.__shell = {
+    get win() {
+      return win
+    },
+    get tabs() {
+      return tabs
+    },
+    get covered() {
+      return covered
+    },
+    inBrowser: () => inBrowser(),
+    tabHasFocus: () => tabHasFocus(),
+    focused: () => webContents.getFocusedWebContents()?.getURL() ?? null,
+    /** run a menu item by its label, as its key would */
+    menu: (label) => {
+      const find = (items) => {
+        for (const i of items) {
+          if (i.label === label && i.click) return i
+          const sub = i.submenu && find(i.submenu.items)
+          if (sub) return sub
+        }
+      }
+      const item = find(Menu.getApplicationMenu().items)
+      item?.click()
+      return !!item
+    },
+  }
+}
+
 app.whenReady().then(async () => {
+  if (HIDDEN) app.dock?.hide()
   registerExtensionToolbar()
   await loadStore()
   buildMenu()
@@ -1556,11 +1794,55 @@ app.whenReady().then(async () => {
   })
 })
 app.on('window-all-closed', () => app.quit())
-app.on('before-quit', () => {
+/**
+ * Sign-ins kept in session cookies (no expiry) used to be gone after every restart, because
+ * Chromium drops those at quit. Chrome keeps them when it restores your tabs; so does this: at
+ * quit each profile used this run has its session cookies given an expiry two weeks out. They
+ * stay in Chromium's own cookie store, encrypted as the rest are; nothing is written elsewhere.
+ */
+const KEEP_SESSION_COOKIES_S = 14 * 24 * 3600
+async function keepSessionCookies() {
+  const until = Math.floor(Date.now() / 1000) + KEEP_SESSION_COOKIES_S
+  await Promise.all(
+    [...sessions.values()].map(async (ses) => {
+      const all = await ses.cookies.get({}).catch(() => [])
+      await Promise.all(
+        all
+          .filter((c) => c.session)
+          .map((c) =>
+            ses.cookies
+              .set({
+                url: `${c.secure ? 'https' : 'http'}://${c.domain.replace(/^\./, '')}${c.path || '/'}`,
+                name: c.name,
+                value: c.value,
+                ...(c.hostOnly ? {} : { domain: c.domain }),
+                path: c.path,
+                secure: c.secure,
+                httpOnly: c.httpOnly,
+                sameSite: c.sameSite,
+                expirationDate: until,
+              })
+              .catch(() => {}),
+          ),
+      )
+      await ses.cookies.flushStore().catch(() => {})
+    }),
+  )
+}
+let cookiesKept = false
+app.on('before-quit', (e) => {
+  // first pass: hold the quit while the session cookies are kept (never more than 3 s)
+  if (!cookiesKept) {
+    cookiesKept = true
+    e.preventDefault()
+    Promise.race([keepSessionCookies(), new Promise((r) => setTimeout(r, 3000))]).finally(() => app.quit())
+    return
+  }
   quitting = true
   clearTimeout(saveTimer)
   try {
-    writeFileSync(STATE_FILE, JSON.stringify(storeData(), null, 2))
+    writeFileSync(`${STATE_FILE}.quit`, JSON.stringify(storeData(), null, 2))
+    renameSync(`${STATE_FILE}.quit`, STATE_FILE)
   } catch {}
   if (serverChild) serverChild.kill()
 })

@@ -16,10 +16,14 @@ contextBridge.exposeInMainWorld('laikaShell', {
   onState: (cb) => listen('shell:state', cb),
   onCommand: (cb) => listen('shell:cmd', cb),
   onFind: (cb) => listen('shell:find', cb),
+  /** stills of the pages on show, taken as page UI covers the dock, to draw under it */
+  onFrames: (cb) => listen('shell:frames', cb),
   /** where the active tab's page is drawn, in page pixels; null while the dock is closed */
   setBounds: (rect) => ipcRenderer.send('shell:bounds', rect),
   /** something in the page is drawn over the browser area, so the native view must step aside */
   setCovered: (on) => ipcRenderer.send('shell:covered', !!on),
+  /** keyboard focus is inside the browser dock: browser keys (⌘W, ⌘F, ⌘R …) are for it */
+  setDockFocus: (on) => ipcRenderer.send('shell:dock-focus', !!on),
   tab: (op, args) => invoke('shell:tab', { op, ...args }),
   profile: (op, args) => invoke('shell:profile', { op, ...args }),
   chromeProfiles: () => invoke('shell:chrome-profiles'),

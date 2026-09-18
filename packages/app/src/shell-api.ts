@@ -15,6 +15,18 @@ export type ShellTab = {
   audible: boolean
   muted: boolean
   failed: { code: number; desc: string; url: string } | null
+  /** the page crashed or was ended (the reason, e.g. 'crashed', 'oom'); null once reloaded */
+  gone?: string | null
+  /** the page stopped answering */
+  hung?: boolean
+  /** a permission the page is waiting on you for (camera, location …) */
+  ask?: {
+    origin: string
+    what: string
+    text?: string | null
+    yes?: string | null
+    no?: string | null
+  } | null
   /** restored from the last launch; gets a renderer when first activated */
   sleeping: boolean
   /** the tab's webContents id while it has a renderer: extension icons show its state */
@@ -80,8 +92,16 @@ export type ShellCommand = {
     | 'pick-profile'
     | 'downloads'
     | 'bookmark-edit'
+    | 'key'
   /** bookmark-edit: the bookmark to edit; absent = the active tab's page */
   id?: string
+  /** key: one of Orbit's own keys, pressed inside a web page */
+  code?: string
+  key?: string
+  alt?: boolean
+  meta?: boolean
+  ctrl?: boolean
+  shift?: boolean
 }
 export type ShellExtension = {
   id: string
@@ -112,9 +132,13 @@ export type LaikaShell = {
   onState(cb: (s: ShellState) => void): () => void
   onCommand(cb: (c: ShellCommand) => void): () => void
   onFind(cb: (r: { tab: string; active: number; total: number }) => void): () => void
+  /** stills of the pages on show, sent as page UI covers the dock (newer shells) */
+  onFrames?(cb: (frames: { tab: string; src: string }[]) => void): () => void
   /** the dock's view area; in a split, also each pane's, by tab id */
   setBounds(rect: (ShellRect & { panes?: Record<string, ShellRect> }) | null): void
   setCovered(on: boolean): void
+  /** keyboard focus is inside the browser dock, so the browser's keys are for it (newer shells) */
+  setDockFocus?(on: boolean): void
   tab(op: string, args?: Record<string, unknown>): Promise<unknown>
   profile(op: string, args?: Record<string, unknown>): Promise<unknown>
   chromeProfiles(): Promise<ChromeProfile[]>

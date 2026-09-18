@@ -47,7 +47,9 @@ body.in-shell > header :is(button, input, form, a, .tool, #hdr) { -webkit-app-re
   background: var(--w-bar);
   border-bottom: 1px solid var(--w-line);
 }
-.wb-strip { display: flex; gap: 2px; min-width: 0; flex: 1; overflow-x: auto; scrollbar-width: none }
+/* the strip is as wide as its tabs, so "+" follows the last one as in Chrome; once they no
+   longer fit it shrinks and scrolls, and "+" stays in view at the end of the row */
+.wb-strip { display: flex; gap: 2px; min-width: 0; flex: 0 1 auto; overflow-x: auto; scrollbar-width: none }
 .wb-strip::-webkit-scrollbar { display: none }
 .wb-tab {
   position: relative;
@@ -294,6 +296,19 @@ i.wb-fav { border: 1.5px solid var(--pc); opacity: .6; border-radius: 50% }
 
 /* ------------------------------------------------------------------ the view */
 .wb-view { flex: 1; min-height: 0; position: relative; overflow: auto; background: var(--n2) }
+/* the page's still, drawn while page UI covers the browser and the real page is taken off */
+.wb-still { background-size: 100% 100%; background-repeat: no-repeat }
+/* a page's permission question, in a bar above it */
+.wb-ask { flex: none; display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 12px; background: var(--n4); border-bottom: 1px solid var(--w-line); font-size: 12.5px }
+.wb-ask span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+/* a crashed or hung page: a small card where it was, with its reload */
+.wb-down { max-width: 420px; margin: 16vh auto 0; padding: 18px 20px; border: 1px solid var(--w-line); border-radius: 12px; background: var(--n4) }
+.wb-down b { display: block; font-size: 14px; font-weight: 600 }
+.wb-down p { margin: 4px 0 14px; color: var(--w-dim); font-size: 12.5px }
+.wb-down div { display: flex; gap: 8px }
+#wb .wb-tab.down .wb-fav { border-color: var(--warn); border-style: dashed; opacity: 1 }
+#wb .wb-tab.down .wb-title { color: var(--warn) }
+.wb-still > :not(.wb-pane):not(.wb-split) { visibility: hidden }
 .wb-waking { position: absolute; inset: 0; display: grid; place-items: center; color: var(--w-faint) }
 
 /* start page and cards */
@@ -374,9 +389,12 @@ i.wb-fav { border: 1.5px solid var(--pc); opacity: .6; border-radius: 50% }
    corners flaring into it; the others sit on the frame with hairline separators between them. */
 #wb { --tab-frame: var(--n1); --tab-top: var(--n6) }
 #wb .wb-tabs { height: 42px; padding: 8px 8px 0 4px; gap: 0; background: var(--tab-frame); border-bottom: 0; align-items: flex-end }
-#wb .wb-strip { gap: 0; padding: 0 12px; align-items: flex-end; height: 100% }
+#wb .wb-strip { gap: 0; padding: 0 10px 0 12px; align-items: flex-end; height: 100% }
 #wb .wb-tab {
   flex: 0 1 240px;
+  /* the container query below gives the tab size containment, so without a width the strip
+     would measure its tabs as nothing and squeeze them */
+  width: 240px;
   min-width: 42px;
   height: 34px;
   gap: 8px;
@@ -417,7 +435,7 @@ i.wb-fav { border: 1.5px solid var(--pc); opacity: .6; border-radius: 50% }
   #wb .wb-tab.on .wb-x { display: none }
 }
 #wb .wb-tab.sleeping .wb-fav, #wb .wb-tab.sleeping .wb-title { opacity: 0.55 }
-#wb .wb-new { display: grid; place-items: center; width: 28px; height: 28px; margin: 0 0 4px 2px; border-radius: 50%; color: var(--w-dim) }
+#wb .wb-new { flex: none; display: grid; place-items: center; width: 28px; height: 28px; margin: 0 0 4px; border-radius: 50%; color: var(--w-dim) }
 #wb .wb-new:hover { background: var(--n9); color: var(--w-text) }
 
 /* toolbar: the same surface as the active tab, round buttons, a pill of an address bar */
@@ -543,3 +561,17 @@ i.wb-fav { border: 1.5px solid var(--pc); opacity: .6; border-radius: 50% }
 #wb .wb-tab.split { box-shadow: inset 0 2px 0 color-mix(in srgb, var(--acc) 55%, transparent) }
 #wb .wb-tab.pair { background: color-mix(in srgb, var(--n9) 55%, transparent); color: var(--w-text) }
 #wb .wb-splitbtn.on { color: var(--acc) }
+
+/* ------------------------------------------------------------------ narrow */
+/* A browser squeezed beside panels kept its full toolbar, which spilled out over the panel next
+   to it. The toolbar keeps to its own box, and when narrow sheds what matters least first. */
+#wb { container: wb / inline-size }
+#wb .wb-nav, #wb .wb-tabs { overflow: hidden }
+#wb .wb-omni { min-width: 0 }
+@container wb (max-width: 620px) {
+  #wb .wb-prof span, #wb .wb-actions, #wb [data-act="exts"], #wb .wb-splitbtn, #wb [data-act="profiles"], #wb .wb-zoom { display: none }
+}
+@container wb (max-width: 420px) {
+  #wb [data-act="fwd"], #wb .wb-dl, #wb [data-act="find"], #wb .wb-star { display: none }
+  #wb .wb-omni { margin: 0 2px; padding: 0 8px }
+}

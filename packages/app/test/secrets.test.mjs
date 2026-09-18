@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { hasSecret, listSecrets, readSnippet, saveSecret, secretTools, validName } from '../secrets.mjs'
 
 /** the SDK's tool() shape, enough to call a handler */
@@ -49,9 +49,12 @@ describe('secrets', () => {
   })
 
   describe.runIf(process.platform === 'darwin')('in a real keychain', () => {
+    // made in beforeAll, not here: runIf skips the tests on Linux, but this body still runs there
     const dir = mkdtempSync(join(tmpdir(), 'secrets-test-'))
     const keychain = join(dir, 'test.keychain')
-    execFileSync('security', ['create-keychain', '-p', 'test', keychain])
+    beforeAll(() => {
+      execFileSync('security', ['create-keychain', '-p', 'test', keychain])
+    })
     afterAll(() => {
       try {
         execFileSync('security', ['delete-keychain', keychain])
