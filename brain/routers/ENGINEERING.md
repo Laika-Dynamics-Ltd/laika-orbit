@@ -10,7 +10,7 @@
 - Files: packages/core/src/recall.ts — the seven-step zero-LLM recall path
 - Files: packages/core/src/score.ts — inverted-index scoring, returns a confidence margin
 - Files: packages/core/src/slice.ts — section slicing and the one-hop pointer follow
-- Skills: 1brain recall — query the knowledge base from the CLI
+- Skills: Laika Orbit recall — query the knowledge base from the CLI
 - Rules: MAX_HOPS — hard cap of one pointer hop, enforced by test
 
 ## 3 — the graph viewer

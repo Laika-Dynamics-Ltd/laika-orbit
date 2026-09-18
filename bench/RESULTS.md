@@ -64,7 +64,7 @@ Re-run against a real `brain/` at Gate 3 before treating the numbers as settled.
 
 `node bench/token-delta.mjs` · 97-doc corpus (this repo) · 12 golden questions.
 
-| | baseline | 1brain | saving |
+| | baseline | Laika Orbit recall | saving |
 |---|---|---|---|
 | total tokens | 228,657 | 5,004 | **97.8%** |
 | median per question | — | — | **97.8%** |
@@ -114,4 +114,4 @@ with the slow one would be worse than no optimisation at all.
 
 Wired into the app and MCP servers, which are long-lived. The CLI builds fresh per
 invocation, so it benefits only within a single process — persisting the index to
-disk is the follow-up, and is what would make `1brain recall` instant from cold.
+disk is the follow-up, and is what would make `laikaorbit recall` instant from cold.

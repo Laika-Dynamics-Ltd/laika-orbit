@@ -1,0 +1,89 @@
+/* The profiler panel (profiler-panel.ts). Theme tokens only, every class .pf-, and nothing here
+   positions the panel: it is the inside of a panel body, laid out for a column. The six series
+   are the theme's own signal colours, so the charts follow the theme like everything else. */
+.pf {
+  --pf-1: var(--info);
+  --pf-2: var(--acc);
+  --pf-3: var(--ok);
+  --pf-4: var(--warn);
+  --pf-5: var(--cyan);
+  --pf-6: var(--n24);
+  padding: 12px 14px 20px;
+  color: var(--tx);
+  font: 400 12.5px/1.45 ui-sans-serif, -apple-system, system-ui, sans-serif;
+}
+.pf-top { display: flex; align-items: center; gap: 10px; margin-bottom: 10px }
+.pf-live { display: inline-flex; align-items: center; gap: 6px; color: var(--dim); flex: 1; min-width: 0 }
+.pf-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); animation: pf-pulse 1s infinite }
+.pf-dot.off { background: var(--err); animation: none }
+@keyframes pf-pulse { 50% { opacity: .35 } }
+@media (prefers-reduced-motion: reduce) { .pf-dot { animation: none } }
+.pf-seg { display: inline-flex; border: 1px solid var(--ln); border-radius: 7px; overflow: hidden }
+.pf-seg button { background: none; border: 0; border-radius: 0; color: var(--dim); padding: 3px 9px; font: inherit; font-weight: 500; cursor: pointer }
+.pf-seg button.on { background: var(--n9); color: var(--tx) }
+
+.pf-down { margin: 0 0 12px; padding: 12px 14px; border: 1px dashed var(--n16); border-radius: 10px; color: var(--dim) }
+.pf-down p { margin: 0 0 10px }
+.pf-down code, .pf-findings code { font: 11.5px ui-monospace, Menlo, monospace; color: var(--tx) }
+
+.pf-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)); gap: 8px; margin-bottom: 12px }
+.pf-tile { display: flex; flex-direction: column; gap: 1px; padding: 9px 11px; background: var(--pan2); border: 1px solid var(--ln); border-radius: 9px; min-width: 0 }
+.pf-tile span { color: var(--dim2); font-size: 11px }
+.pf-tile b { font-size: 21px; font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap }
+.pf-tile b.bad { color: var(--err) }
+.pf-tile i { font-style: normal; color: var(--dim); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+
+.pf-card { position: relative; margin-bottom: 12px; padding: 11px 13px; background: var(--pan2); border: 1px solid var(--ln); border-radius: 10px }
+.pf-card h3 { margin: 0 0 6px; font-size: 12.5px; font-weight: 650 }
+.pf-card h3 em { font-style: normal; font-weight: 400; color: var(--dim2); margin-left: 6px }
+.pf-legend { display: flex; flex-wrap: wrap; gap: 3px 12px; color: var(--dim); font-size: 11px; margin-bottom: 6px }
+.pf-legend span::before { content: ''; display: inline-block; width: 9px; height: 9px; border-radius: 3px; background: var(--c); margin-right: 5px; vertical-align: -1px }
+.pf svg { display: block; width: 100%; height: 170px; overflow: visible }
+.pf svg text { fill: var(--dim2); font-size: 10px; font-variant-numeric: tabular-nums }
+.pf .pf-grid { stroke: var(--n9) }
+.pf .pf-xh { stroke: var(--dim); stroke-dasharray: 3 3 }
+.pf-tip { position: absolute; display: none; z-index: 5; min-width: 170px; padding: 8px 10px; pointer-events: none; background: var(--n1); border: 1px solid var(--n16); border-radius: 8px; box-shadow: 0 6px 20px color-mix(in srgb, var(--n0) 55%, transparent); font-size: 11.5px }
+.pf-tip-h { color: var(--dim2); margin-bottom: 4px }
+.pf-tip-h b, .pf-tip-r b { color: var(--tx); font-weight: 550; font-variant-numeric: tabular-nums }
+.pf-tip-r { display: flex; gap: 7px; align-items: center; color: var(--dim) }
+.pf-tip-r b { margin-left: auto }
+.pf-tip-r i { width: 8px; height: 8px; border-radius: 2px }
+
+.pf-bench-bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 4px 0 8px }
+.pf-bench-bar input, .pf-bench-bar select { background: var(--n2); border: 1px solid var(--ln); color: var(--tx); border-radius: 7px; padding: 5px 8px; font: inherit }
+.pf-bench-bar input { flex: 1 1 180px; min-width: 0 }
+.pf-btn { padding: 5px 12px; border-radius: 7px; font-size: 12px }
+.pf-btn.ghost { background: none; color: var(--dim); border: 1px solid var(--ln); font-weight: 500 }
+.pf-btn:disabled { opacity: .45; cursor: default }
+.pf-prog { display: flex; align-items: center; gap: 10px; margin: 0 0 8px; color: var(--dim); font-size: 11.5px }
+.pf-prog[hidden] { display: none }
+.pf-prog i { display: block; height: 5px; width: 0; flex: none; max-width: 40%; background: var(--pf-1); border-radius: 3px; transition: width .9s linear }
+
+.pf-scroll { overflow-x: auto }
+.pf-t { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 11.5px }
+.pf-t th { text-align: left; color: var(--dim2); font-weight: 500; padding: 5px 6px; border-bottom: 1px solid var(--ln); white-space: nowrap }
+.pf-t td { padding: 5px 6px; border-bottom: 1px solid var(--n6); color: var(--dim); white-space: nowrap }
+.pf-t .r { text-align: right }
+.pf-t td.name { color: var(--tx); white-space: normal; min-width: 140px }
+.pf-t td.name small { display: block; color: var(--dim2); font-size: 10.5px }
+.pf-t .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 7px }
+.pf-dim { color: var(--dim2) }
+.pf-tag { font-size: 10px; color: var(--dim2); border: 1px solid var(--ln); border-radius: 5px; padding: 0 5px; margin-left: 6px }
+.pf-delta { display: block; font-size: 10.5px }
+.pf-delta.better { color: var(--ok) }
+.pf-delta.worse { color: var(--err) }
+.pf-delta.same { color: var(--dim2) }
+.pf-acts button { background: none; border: 0; padding: 0 3px; color: var(--dim2); font: inherit; font-weight: 400; cursor: pointer }
+.pf-acts button:hover { color: var(--tx) }
+
+.pf-findings ul { margin: 4px 0 0; padding-left: 18px }
+.pf-findings li { margin: 0 0 7px; color: var(--dim) }
+.pf-findings b { color: var(--tx) }
+.pf-none { margin: 0; color: var(--dim2) }
+
+.pf-ab-sc h4 { margin: 8px 0 4px; font-size: 12px; font-weight: 600 }
+.pf-ab-row { display: grid; grid-template-columns: minmax(80px, 30%) 1fr 44px; gap: 8px; align-items: center; margin: 4px 0; font-size: 11.5px; color: var(--dim) }
+.pf-ab-row b { color: var(--tx); text-align: right; font-variant-numeric: tabular-nums }
+.pf-ab-track { height: 12px; background: var(--n6); border-radius: 4px; overflow: hidden; display: flex; gap: 2px }
+.pf-ab-track i { display: block; height: 100% }
+.pf-ab-meta { font-size: 10.5px; color: var(--dim2); margin: -1px 0 4px; padding-left: calc(30% + 8px); font-variant-numeric: tabular-nums }

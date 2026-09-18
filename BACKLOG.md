@@ -1,4 +1,4 @@
-# laika-1brain — backlog
+# Laika Orbit — backlog
 
 State as of 2026-09-16. Gates in `STACK.md`, gauntlet results in `.gauntlet/RESULTS.md`.
 Effort is rough: **S** = under an hour · **M** = half a day · **L** = a day or more.
@@ -10,7 +10,7 @@ Effort is rough: **S** = under an hour · **M** = half a day · **L** = a day or
 | | Item | Why | Effort |
 |---|---|---|---|
 | 0.1 | **`git init` + first commit** | ~2,150 lines of source, a 104-minute gauntlet run and all the research exist only on this disk. One bad `rm` loses the lot. | **S** |
-| 0.2 | `.gitignore` | `node_modules`, `dist`, `.1brain/cache`, `.gauntlet/work/*/out`, `.gauntlet/void-run-1`. Without it the first commit is ~600MB. | **S** |
+| 0.2 | `.gitignore` | `node_modules`, `dist`, `.orbit/cache`, `.gauntlet/work/*/out`, `.gauntlet/void-run-1`. Without it the first commit is ~600MB. | **S** |
 | 0.3 | `README.md` | What this is, how to run it, what the four packages do. First thing anyone opening the repo needs. | **S** |
 | 0.4 | `LICENSE` | Decide internal vs open. Cheap now, awkward later. | **S** |
 
@@ -25,6 +25,7 @@ README do not. Everything below assumes 0.1–0.2 land first.
 | 1.2 | **Incremental indexing by content hash** | Re-index is ~11s on 2,383 files because every file is re-read. This is what stands between the app and your `dev` tree (403k files). Specced in `STACK.md`, zero implementation. | **M** |
 | 1.3 | Fix the tied-score display | Five candidates all reading `100%` is decoration, not ranking. Show raw score, or collapse to "5 files tie". | **S** |
 | 1.4 | Search-as-you-type | Recall is ~1ms. There is no reason to make the user press a button. | **S** |
+| 1.5 | **Colour debt back to 163 / 48** | Raised to 218 hex / 82 rgb-hsl on 19 Sep 2026 so the public release could ship. Pulse (`pulse*.css`), `node-preview.css`, `sessions.css` and `session-terminal.ts` added the literals; tokenise them and lower the baselines in `test/design-debt.test.ts`. | **S** |
 
 ## 2 · Finish the gauntlet port
 
@@ -39,7 +40,7 @@ README do not. Everything below assumes 0.1–0.2 land first.
 | | Item | Why | Effort |
 |---|---|---|---|
 | 3.1 | **Gate 8 — dream sequence** | Last unbuilt gate. Folds `raw/` into `wiki/`, flags contradictions and stale claims, emits a reviewable diff. Only earns its keep once a real corpus flows through `raw/` — so it follows 1.1. | **M** |
-| 3.2 | CI (GitHub Actions) | Run typecheck / test / lint / `1brain lint` on push. Specced in Gate 1. | **S** |
+| 3.2 | CI (GitHub Actions) | Run typecheck / test / lint / `laikaorbit lint` on push. Specced in Gate 1. | **S** |
 | 3.3 | lefthook pre-commit | `biome check --staged` + typecheck. Specced in Gate 1. | **S** |
 
 ## 4 · Known-weak, revisit when it bites

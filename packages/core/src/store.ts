@@ -31,7 +31,7 @@ export const DEFAULT_IGNORE = [
   'vendor',
   '.terraform',
   '.pnpm-store',
-  '.1brain',
+  '.orbit',
 ]
 // Path PREFIXES to skip. Directory-name matching is too blunt here: `.gauntlet`
 // holds scratch working copies AND the bar definition and results, which are
@@ -143,7 +143,7 @@ export class LocalFsStore implements Store {
     const abs = join(this.#root, path)
     if (IMAGE.test(path)) return '' // pixels are not text; the file name is all that indexes
     if (this.#extract && EXTRACTABLE.test(path)) {
-      const t = await extractText(abs, { cacheDir: join(this.#root, '.1brain', 'cache') })
+      const t = await extractText(abs, { cacheDir: join(this.#root, '.orbit', 'cache') })
       if (t !== null) return t
     }
     return readFile(abs, 'utf8')

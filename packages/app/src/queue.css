@@ -1,0 +1,112 @@
+/*
+ * The work queue. Like runs.css: the view (.qu) carries no position, width or z-index of its own,
+ * so the page and a future panel host the same markup. Ramp and tone tokens only.
+ */
+.qu {
+  --bg: var(--n2);
+  --panel: var(--n6);
+  --line: var(--n16);
+  --tx: var(--n35);
+  --dim: var(--n29);
+  --faint: var(--n24);
+  color: var(--tx);
+  font: 400 14px/1.45 system-ui, -apple-system, sans-serif;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.qu * { box-sizing: border-box }
+
+.qu-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap }
+.qu-chips { display: flex; gap: 8px; flex-wrap: wrap }
+.qu-chip { padding: 4px 11px; border-radius: 999px; border: 1px solid var(--line); color: var(--dim); font-size: 13px }
+.qu-chip b { color: var(--tx); margin-right: 4px; font-variant-numeric: tabular-nums }
+.qu-chip.live b { color: var(--cyan, var(--info)) }
+.qu-chip.ok b { color: var(--ok) }
+.qu-chip.bad { border-color: var(--err-bd); }
+.qu-chip.bad b { color: var(--err) }
+.qu-chip.dim { color: var(--faint) }
+.qu-feed { margin-left: auto; font-size: 12.5px; color: var(--faint) }
+.qu-feed.ok { color: var(--ok) }
+.qu-feed.ok::before { content: ''; display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: var(--ok) }
+.qu-feed.bad { color: var(--err) }
+
+.qu-banner { padding: 8px 12px; border-radius: 8px; background: var(--err-bg); color: var(--err-lt); border: 1px solid var(--err-bd) }
+
+.qu-add { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); padding: 10px 14px }
+.qu-add summary { cursor: pointer; color: var(--dim); font-weight: 500 }
+.qu-add[open] summary { margin-bottom: 10px; color: var(--tx) }
+.qu-add form { display: flex; flex-direction: column; gap: 8px }
+.qu input, .qu textarea, .qu select {
+  font: inherit;
+  font-size: 13px;
+  color: var(--tx);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 6px 9px;
+}
+.qu textarea { resize: vertical; min-height: 70px }
+.qu-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap }
+.qu-row label { display: flex; align-items: center; gap: 6px; color: var(--dim); font-size: 12.5px }
+.qu-row input[type='number'] { width: 76px }
+.qu-row .qu-btn { margin-left: auto }
+
+.qu-btn {
+  font: 500 12.5px system-ui, sans-serif;
+  padding: 5px 11px;
+  border-radius: 7px;
+  border: 1px solid var(--info);
+  background: var(--info);
+  color: var(--info-ink);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.qu-btn.ghost { background: transparent; border-color: var(--line); color: var(--dim) }
+.qu-btn:hover { filter: brightness(1.15) }
+.qu-btn.ghost:hover { color: var(--tx) }
+
+.qu-sec h2 { display: flex; align-items: baseline; gap: 8px; margin: 6px 0 8px; font-size: 13px; font-weight: 600; letter-spacing: 0.03em; color: var(--dim) }
+.qu-sec h2 span { color: var(--faint); font-weight: 400 }
+.qu-done summary { cursor: pointer; list-style: none }
+.qu-done summary h2 { display: inline-flex }
+.qu-empty { margin: 0 0 6px; color: var(--faint); font-size: 13px }
+.qu-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px }
+
+.qu-item { border: 1px solid var(--line); border-left: 3px solid var(--line); border-radius: 9px; background: var(--panel); padding: 9px 12px; display: flex; flex-direction: column; gap: 6px }
+.qu-item.s-running { border-left-color: var(--cyan, var(--info)) }
+.qu-item.s-queued { border-left-color: var(--n21) }
+.qu-item.s-blocked { border-left-color: var(--warn) }
+.qu-item.s-done { border-left-color: var(--ok); opacity: 0.8 }
+.qu-item.s-cancelled { opacity: 0.55 }
+.qu-main { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap }
+.qu-state { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--faint); min-width: 64px }
+.s-running .qu-state { color: var(--cyan, var(--info)) }
+.s-blocked .qu-state { color: var(--warn) }
+.s-done .qu-state { color: var(--ok) }
+.qu-title { font-weight: 600 }
+.qu-meta { color: var(--faint); font-size: 12.5px }
+.qu-tags { display: flex; gap: 6px; flex-wrap: wrap }
+.qu-tags:empty { display: none }
+.qu-tag { font-size: 11.5px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--dim) }
+.qu-tag.ok { border-color: var(--ok-bd); color: var(--ok) }
+.qu-tag.bad { border-color: var(--err-bd); color: var(--err) }
+.qu-tag.dim { color: var(--faint) }
+.qu-err { font-size: 12.5px; color: var(--err-lt) }
+.qu-acts { display: flex; align-items: center; gap: 8px; flex-wrap: wrap }
+.qu-flags { display: flex; gap: 10px; margin-right: auto; font-size: 12px; color: var(--dim) }
+.qu-flags label { display: flex; align-items: center; gap: 4px }
+.qu-move { max-width: 200px }
+.qu-brief { width: 100%; font-size: 12.5px; color: var(--dim) }
+.qu-brief summary { cursor: pointer }
+.qu-brief pre { white-space: pre-wrap; margin: 6px 0 0; padding: 8px; border-radius: 7px; background: var(--bg); font: 12px ui-monospace, Menlo, monospace; color: var(--tx) }
+
+/* the page around the view */
+.qu-page { margin: 0; background: var(--n2) }
+.qu-top { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 16px; padding: 12px 24px; background: color-mix(in srgb, var(--n2) 92%, transparent); backdrop-filter: blur(10px); border-bottom: 1px solid var(--n16); color: var(--n35); font: 400 14px system-ui, sans-serif }
+.qu-top a { color: var(--n29); font-size: 12.5px; text-decoration: none }
+.qu-top a:first-of-type { margin-left: auto }
+.qu-top a:hover { color: var(--n35) }
+.qu-brand { display: flex; align-items: center; gap: 8px; letter-spacing: 0.04em }
+.qu-brand i { width: 9px; height: 9px; border-radius: 50%; background: var(--acc) }
+.qu-pagemain { max-width: 1100px; margin: 0 auto; padding: 16px 24px 60px }

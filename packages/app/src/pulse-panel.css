@@ -1,0 +1,45 @@
+/* The rail's Pulse button: sits above the widgets, reads as navigation rather than as a card. */
+.pu-rail {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  margin: 0 0 10px; padding: 9px 11px; cursor: pointer;
+  font: inherit; font-size: 12.5px; font-weight: 500; text-align: left;
+  color: #9fd8f2; background: rgba(86, 216, 255, .07);
+  border: 1px solid rgba(86, 216, 255, .22); border-radius: 9px;
+  transition: background .15s, border-color .15s, color .15s;
+}
+.pu-rail:hover { background: rgba(86, 216, 255, .14); border-color: rgba(86, 216, 255, .4); color: #d6f2ff; }
+.pu-rail svg { flex: none; }
+.pu-rail span { letter-spacing: .01em; }
+
+/* The window itself: a dark overlay, because the scene inside it is a starfield. */
+#pw {
+  position: fixed; inset: 0; z-index: 70; display: none;
+  background: rgba(3, 5, 10, .68); backdrop-filter: blur(3px);
+  align-items: center; justify-content: center;
+}
+#pw.on { display: flex; }
+.pw-win {
+  display: flex; flex-direction: column;
+  width: min(1320px, 94vw); height: min(860px, 90vh);
+  background: #05070d; border: 1px solid rgba(86, 216, 255, .2);
+  border-radius: 13px; overflow: hidden; box-shadow: 0 26px 70px rgba(0, 0, 0, .6);
+}
+.pw-bar {
+  display: flex; align-items: center; gap: 9px; flex: none;
+  padding: 9px 12px; border-bottom: 1px solid rgba(86, 216, 255, .13);
+  background: rgba(10, 16, 28, .8); color: #cfe3f5; font-size: 12.5px;
+}
+.pw-bar b { color: #eaf4ff; font-weight: 600; }
+.pw-tag {
+  font-size: 10px; letter-spacing: .1em; text-transform: uppercase;
+  color: #ffb488; background: rgba(255, 138, 76, .12);
+  border: 1px solid rgba(255, 138, 76, .28); border-radius: 5px; padding: 2px 6px;
+}
+.pw-sp { flex: 1; }
+.pw-close, .pw-pop {
+  border: 0; background: transparent; color: #7f9bb5; cursor: pointer;
+  font: inherit; font-size: 15px; line-height: 1; padding: 4px 7px; border-radius: 6px;
+  text-decoration: none;
+}
+.pw-close:hover, .pw-pop:hover { background: rgba(255, 255, 255, .08); color: #eaf4ff; }
+.pw-frame { flex: 1; width: 100%; border: 0; display: block; }

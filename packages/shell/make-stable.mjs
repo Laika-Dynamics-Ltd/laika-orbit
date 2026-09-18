@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 /**
- * `pnpm shell:stable` — a laika-1brain to live in while the checkout keeps changing.
+ * `pnpm shell:stable` — a Laika Orbit to live in while the checkout keeps changing.
  *
- * Takes a snapshot of the current commit into its own git worktree (~/.laika/1brain-stable by
+ * Takes a snapshot of the current commit into its own git worktree (~/.laika/orbit-stable by
  * default), installs it, and builds two apps:
  *
- *   laika-1brain       the stable snapshot, on :5300, with the usual browser profile (your
+ *   Laika Orbit        the stable snapshot, on :5300, with the usual browser profile (your
  *                      logins) and the Dock pin. Nothing in the checkout touches it: no live
  *                      reload, no server restarts, no half-finished edits.
- *   laika-1brain Dev   the checkout itself, on :5200, with a profile of its own, for trying
- *                      what is being built. Not pinned; `open -a "laika-1brain Dev"`.
+ *   Laika Orbit Dev    the checkout itself, on :5200, with a profile of its own, for trying
+ *                      what is being built. Not pinned; `open -a "Laika Orbit Dev"`.
  *
  * Both read the same brain, Claude accounts and .env.local, so chats, history and settings are
  * shared. Each has its own chat host, so a chat started in one lives in that one. Run this again
@@ -23,7 +23,7 @@ import { fileURLToPath } from 'node:url'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(HERE, '../..')
-const STABLE = process.env.LAIKA_STABLE_DIR ?? join(homedir(), '.laika', '1brain-stable')
+const STABLE = process.env.LAIKA_STABLE_DIR ?? join(homedir(), '.laika', 'orbit-stable')
 const env = { ...process.env }
 delete env.ELECTRON_RUN_AS_NODE
 const sh = (cmd, args, opts = {}) => execFileSync(cmd, args, { stdio: 'inherit', env, ...opts })
@@ -68,8 +68,8 @@ sh(process.execPath, [join(STABLE, 'packages/shell/make-app.mjs')], {
     ...env,
     LAIKA_APP_NAME: 'Laika Orbit',
     LAIKA_APP_PORT: '5300',
-    LAIKA_USER_DATA: 'laika-1brain',
-    LAIKA_BUNDLE_ID: 'com.laikadynamics.1brain',
+    LAIKA_USER_DATA: 'Laika Orbit',
+    LAIKA_BUNDLE_ID: 'com.laikadynamics.laikaorbit',
     LAIKA_BRAIN_ROOT: ROOT,
     LAIKA_STABLE: '1',
   },
@@ -118,8 +118,8 @@ sh(process.execPath, [join(ROOT, 'packages/shell/make-app.mjs')], {
     ...env,
     LAIKA_APP_NAME: 'Laika Orbit Dev',
     LAIKA_APP_PORT: '5200',
-    LAIKA_USER_DATA: 'laika-1brain-dev',
-    LAIKA_BUNDLE_ID: 'com.laikadynamics.1brain.dev',
+    LAIKA_USER_DATA: 'Laika Orbit Dev',
+    LAIKA_BUNDLE_ID: 'com.laikadynamics.laikaorbit.dev',
     LAIKA_NO_DOCK: '1',
   },
 })

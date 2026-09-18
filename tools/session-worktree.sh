@@ -18,10 +18,10 @@
 #
 # Example:
 #   tools/session-worktree.sh spanview
-#   -> ../laika-1brain-spanview on branch session/spanview
+#   -> ../laika-orbit-spanview on branch session/spanview
 #
 # Remove when finished:
-#   git worktree remove ../laika-1brain-spanview
+#   git worktree remove ../laika-orbit-spanview
 
 set -euo pipefail
 
@@ -58,7 +58,7 @@ for f in .env.local; do
   fi
 done
 
-# brain/*.local.json and .1brain/ are deliberately NOT linked. They are runtime
+# brain/*.local.json and .orbit/ are deliberately NOT linked. They are runtime
 # state the app rewrites as you click — sharing them would put the sessions back
 # to fighting over one file, which is the thing this script exists to stop.
 

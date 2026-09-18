@@ -31,6 +31,9 @@ export type ShellHistory = {
   profile: string
   at: number
 }
+/** two tabs side by side: a on the left, b on the right; ratio is a's share of the width */
+export type ShellSplit = { a: string; b: string; ratio: number }
+export type ShellRect = { x: number; y: number; width: number; height: number }
 export type ShellBookmark = {
   id: string
   url: string
@@ -55,6 +58,8 @@ export type ShellState = {
   defaultProfile: string
   tabs: ShellTab[]
   active: string | null
+  /** absent in an older shell */
+  splits?: ShellSplit[]
   history: ShellHistory[]
   downloads: ShellDownload[]
   /** by profile id, in bar order (absent in an older shell) */
@@ -107,7 +112,8 @@ export type LaikaShell = {
   onState(cb: (s: ShellState) => void): () => void
   onCommand(cb: (c: ShellCommand) => void): () => void
   onFind(cb: (r: { tab: string; active: number; total: number }) => void): () => void
-  setBounds(rect: { x: number; y: number; width: number; height: number } | null): void
+  /** the dock's view area; in a split, also each pane's, by tab id */
+  setBounds(rect: (ShellRect & { panes?: Record<string, ShellRect> }) | null): void
   setCovered(on: boolean): void
   tab(op: string, args?: Record<string, unknown>): Promise<unknown>
   profile(op: string, args?: Record<string, unknown>): Promise<unknown>

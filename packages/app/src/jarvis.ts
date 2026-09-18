@@ -285,5 +285,7 @@ export function createJarvis(scene: THREE.Scene, stage: HTMLElement) {
     },
     update,
     toggle,
+    /** true while the rings turn on screen, so the map cannot stop drawing */
+    animating: () => enabled && active && !!radii && !reduce.matches,
   }
 }

@@ -164,7 +164,7 @@ export function createNodePreview(host: PreviewHost) {
   const cards = new Map<number, HTMLElement>()
   let shown = new Set<number>()
   let lastNodes: PreviewNode[] | null = null
-  let enabled = localStorage.getItem('1brain:previews') !== '0'
+  let enabled = localStorage.getItem('orbit:previews') !== '0'
   layer.classList.toggle('off', !enabled)
 
   layer.addEventListener('click', (e) => {
@@ -320,7 +320,7 @@ export function createNodePreview(host: PreviewHost) {
   function setEnabled(on: boolean) {
     enabled = on
     layer.classList.toggle('off', !on)
-    localStorage.setItem('1brain:previews', on ? '' : '0')
+    localStorage.setItem('orbit:previews', on ? '' : '0')
     if (!on) clearLayer()
   }
 

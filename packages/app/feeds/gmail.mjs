@@ -19,7 +19,7 @@ import { promisify } from 'node:util'
 const run = promisify(execFile)
 const API = 'https://gmail.googleapis.com/gmail/v1/users/me'
 export const SCOPE = 'https://www.googleapis.com/auth/gmail.readonly'
-const KEYCHAIN = { service: 'laika-1brain gmail', account: 'refresh-token' }
+const KEYCHAIN = { service: 'laika-orbit gmail', account: 'refresh-token' }
 
 // ------------------------------------------------------------ credentials ----
 export async function readRefreshToken() {

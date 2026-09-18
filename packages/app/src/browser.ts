@@ -1,5 +1,5 @@
 /**
- * The browser dock: Chromium tabs inside 1brain, one storage profile per account, so a
+ * The browser dock: Chromium tabs inside Laika Orbit, one storage profile per account, so a
  * second Chrome window is not needed. Opens over the map with `b` (or ⌘⇧B from a tab).
  *
  * This file is the UI only: tab strip, omnibox with history suggestions, find bar,
@@ -18,6 +18,7 @@ import type {
   ShellBookmark,
   ShellDownload,
   ShellExtension,
+  ShellRect,
   ShellState,
   ShellTab,
 } from './shell-api.ts'
@@ -77,6 +78,7 @@ const ICON = {
   star: icon(
     '<path d="M8 2.3l1.75 3.6 3.95.55-2.87 2.77.7 3.93L8 11.28l-3.53 1.87.7-3.93L2.3 6.45l3.95-.55z"/>',
   ),
+  split: icon('<rect x="2.5" y="3" width="11" height="10" rx="1.8"/><path d="M8 3v10"/>'),
   more: icon('<path d="M4 4.5 7.5 8 4 11.5M8.5 4.5 12 8l-3.5 3.5"/>', 14),
   puzzle: icon(
     '<path d="M6.5 2.5a1.5 1.5 0 0 1 3 0V4H12a.5.5 0 0 1 .5.5V7h-1.2a1.5 1.5 0 0 0 0 3h1.2v2.5a.5.5 0 0 1-.5.5H9.5v-1.2a1.5 1.5 0 0 0-3 0V13H4a.5.5 0 0 1-.5-.5V10H4.8a1.5 1.5 0 0 0 0-3H3.5V4.5A.5.5 0 0 1 4 4h2.5z"/>',
@@ -116,6 +118,7 @@ export function createBrowser(host: BrowserHost): BrowserDock {
       <button class="wb-dl" type="button" data-el="dl" hidden></button>
       <span class="wb-actions" data-el="actions"></span>
       <button class="wb-ib" type="button" data-act="exts" title="Extensions" aria-label="Extensions" hidden>${ICON.puzzle}</button>
+      <button class="wb-ib wb-splitbtn" type="button" data-act="split" data-el="splitbtn" aria-label="Split view">${ICON.split}</button>
       <button class="wb-ib" type="button" data-act="find" title="Find in page (⌘F)" aria-label="Find in page">${ICON.find}</button>
       <button class="wb-ib" type="button" data-act="profiles" title="Profiles">${GLOBE}</button>
       <button class="wb-ib wb-close" type="button" data-act="close" title="Close browser (⌘⇧B)" aria-label="Close browser">${ICON.close}</button>
@@ -168,6 +171,8 @@ export function createBrowser(host: BrowserHost): BrowserDock {
   let popCleanup: (() => void) | null = null
 
   const activeTab = () => state?.tabs.find((t) => t.id === state?.active) ?? null
+  const splitOf = (id: string | null | undefined) =>
+    (id && state?.splits?.find((x) => x.a === id || x.b === id)) || null
   const profileOf = (id: string) => state?.profiles.find((p) => p.id === id)
   const tab = (op: string, args: Record<string, unknown> = {}) => shell?.tab(op, args)
 
@@ -210,11 +215,22 @@ export function createBrowser(host: BrowserHost): BrowserDock {
   function reportBounds() {
     if (!shell) return
     if (!open) return shell.setBounds(null)
-    const r = viewEl.getBoundingClientRect()
-    const key = [r.x, r.y, r.width, r.height].map(Math.round).join(',')
+    const box = (e: Element): ShellRect => {
+      const r = e.getBoundingClientRect()
+      return { x: r.x, y: r.y, width: r.width, height: r.height }
+    }
+    const whole = box(viewEl)
+    // a split: where each pane's page goes, inside its frame
+    const inner = [...viewEl.querySelectorAll<HTMLElement>('.wb-pane[data-id] > .wb-pane-in')]
+    const panes = inner.length
+      ? Object.fromEntries(inner.map((e) => [e.parentElement!.dataset.id!, box(e)]))
+      : undefined
+    const key = JSON.stringify([whole, panes], (_k, v) =>
+      typeof v === 'number' ? Math.round(v) : v,
+    )
     if (key === lastRect) return
     lastRect = key
-    shell.setBounds({ x: r.x, y: r.y, width: r.width, height: r.height })
+    shell.setBounds(panes ? { ...whole, panes } : whole)
   }
   new ResizeObserver(() => reportBounds()).observe(viewEl)
   addEventListener('resize', reportBounds)
@@ -294,6 +310,7 @@ export function createBrowser(host: BrowserHost): BrowserDock {
     paintTabs()
     paintNav()
     paintView()
+    reportBounds()
     paintDownload()
     paintBookmarks()
     paintCount()
@@ -322,6 +339,12 @@ export function createBrowser(host: BrowserHost): BrowserDock {
       b.classList.toggle('on', t.id === state.active)
       b.classList.toggle('loading', t.loading)
       b.classList.toggle('sleeping', t.sleeping)
+      // a split's two tabs sit together; the half not in charge of the toolbar is half-lit
+      const sp = splitOf(t.id)
+      b.classList.toggle('split', !!sp)
+      b.classList.toggle('split-a', sp?.a === t.id)
+      b.classList.toggle('split-b', sp?.b === t.id)
+      b.classList.toggle('pair', !!sp && t.id !== state.active && sp === splitOf(state.active))
       b.innerHTML = `<i class="wb-sep"></i>${
         t.favicon && !t.loading
           ? `<img class="wb-fav" src="${esc(t.favicon)}" alt="" referrerpolicy="no-referrer"/>`
@@ -380,6 +403,12 @@ export function createBrowser(host: BrowserHost): BrowserDock {
     for (const a of ['reload', 'find']) {
       ;(root.querySelector(`[data-act="${a}"]`) as HTMLButtonElement).disabled = !t?.url
     }
+    const sb = $<HTMLButtonElement>('splitbtn')
+    const inSplit = !!splitOf(t?.id)
+    sb.hidden = !inShell
+    sb.disabled = !t
+    sb.classList.toggle('on', inSplit)
+    sb.title = inSplit ? 'Exit split view (⌘\\)' : 'Split view with a new tab (⌘\\)'
     const zoom = $<HTMLButtonElement>('zoom')
     const pct = Math.round((t?.zoom ?? 1) * 100)
     zoom.hidden = !t?.url || pct === 100
@@ -404,6 +433,9 @@ export function createBrowser(host: BrowserHost): BrowserDock {
       return
     }
     if (!state) return
+    const sp = splitOf(t?.id)
+    if (sp) return paintSplit(sp)
+    splitKey = ''
     if (t?.url) {
       // the native view covers this; what is here shows only for a sleeping tab's instant
       viewEl.innerHTML = t.sleeping ? `<div class="wb-waking">${esc(hostOf(t.url))}</div>` : ''
@@ -439,6 +471,60 @@ export function createBrowser(host: BrowserHost): BrowserDock {
         )}<button type="button" class="wb-pcard add" data-act="profiles"><i>+</i>profile</button></div>
       <div class="wb-hint">Type above to search or open a site · <kbd>⌘T</kbd> new tab · <kbd>⌘⇧T</kbd> new tab in a profile · <kbd>⇧⌥T</kbd> reopen a closed tab · <kbd>⌘⇧B</kbd> hide the browser</div>
     </div>`
+  }
+  /**
+   * Two panes and a divider. The shell draws each tab's page inside its pane's frame; a pane
+   * with no page yet offers the open tabs to fill it.
+   */
+  let splitKey = ''
+  function paintSplit(sp: { a: string; b: string; ratio: number }) {
+    if (!state) return
+    const tabsById = new Map(state.tabs.map((x) => [x.id, x]))
+    const free = state.tabs.filter((x) => x.url && !splitOf(x.id))
+    const pane = (id: string) => {
+      const x = tabsById.get(id)
+      let body = ''
+      if (x?.url) body = x.sleeping ? `<div class="wb-waking">${esc(hostOf(x.url))}</div>` : ''
+      else
+        body = `<div class="wb-pick">
+          <h3>Choose a tab for this side</h3>
+          ${
+            free.length
+              ? `<div class="wb-picklist">${free
+                  .map(
+                    (f) =>
+                      `<button type="button" data-fill="${esc(f.id)}" style="--pc:${esc(profileOf(f.profile)?.colour ?? 'var(--n19)')}">${
+                        f.favicon
+                          ? `<img class="wb-fav" src="${esc(f.favicon)}" alt="" referrerpolicy="no-referrer"/>`
+                          : '<i class="wb-fav"></i>'
+                      }<span>${esc(tabTitle(f))}</span><small>${esc(hostOf(f.url))}</small></button>`,
+                  )
+                  .join('')}</div>`
+              : ''
+          }
+          <p>or type an address above · <kbd>⌘\\</kbd> leaves split view</p>
+        </div>`
+      return `<div class="wb-pane ${id === state?.active ? 'on' : ''}" data-id="${esc(id)}"><div class="wb-pane-in">${body}</div></div>`
+    }
+    const key = JSON.stringify([
+      sp.a,
+      sp.b,
+      state.active,
+      [sp.a, sp.b].map((id) => {
+        const x = tabsById.get(id)
+        return [x?.url, x?.sleeping]
+      }),
+      [sp.a, sp.b].some((id) => !tabsById.get(id)?.url) &&
+        free.map((f) => [f.id, f.title, f.favicon]),
+    ])
+    if (key !== splitKey) {
+      splitKey = key
+      viewEl.innerHTML = `<div class="wb-split">${pane(sp.a)}<div class="wb-divider" role="separator" aria-orientation="vertical" title="Drag to resize · double-click for half and half"><i></i></div>${pane(sp.b)}</div>`
+      for (const img of viewEl.querySelectorAll<HTMLImageElement>('.wb-pick img'))
+        img.onerror = () => img.replaceWith(el('i', 'wb-fav'))
+    }
+    viewEl.querySelector<HTMLElement>('.wb-split')?.style.setProperty('--r', String(sp.ratio))
+    reportBounds()
   }
   /** the toolbar pill: what is downloading, or what just finished; a plain icon otherwise */
   function paintDownload() {
@@ -1114,6 +1200,11 @@ export function createBrowser(host: BrowserHost): BrowserDock {
       case 'ext-remove':
       case 'ext-store':
         return void extensionAction(act, target.closest<HTMLElement>('[data-id]')?.dataset.id ?? '')
+      case 'split':
+        if (!t) return
+        if (splitOf(t.id)) return void tab('unsplit', { id: t.id })
+        // the new tab's pane gets the address bar (the shell says focus-omnibox)
+        return void tab('split', { id: t.id })
       case 'star':
         return void (bmEditing ? closeEditor(true) : editBookmark())
       case 'bm-remove': {
@@ -1179,6 +1270,25 @@ export function createBrowser(host: BrowserHost): BrowserDock {
   root.querySelector('[data-act="new"]')!.addEventListener('contextmenu', (e) => {
     e.preventDefault()
     profileMenu(e.currentTarget as HTMLElement, null)
+  })
+  // split panes: a click on a pane's own UI puts its tab in charge; the divider resizes
+  viewEl.addEventListener('pointerdown', (e) => {
+    const target = e.target as HTMLElement
+    if (target.closest('.wb-divider')) {
+      e.preventDefault()
+      return void tab('split-drag', { id: state?.active })
+    }
+    const id = target.closest<HTMLElement>('.wb-pane[data-id]')?.dataset.id
+    if (id && id !== state?.active) tab('activate', { id })
+  })
+  viewEl.addEventListener('dblclick', (e) => {
+    if ((e.target as HTMLElement).closest('.wb-divider'))
+      tab('split-ratio', { id: state?.active, ratio: 0.5 })
+  })
+  viewEl.addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('[data-fill]')
+    const id = b?.closest<HTMLElement>('.wb-pane[data-id]')?.dataset.id
+    if (b && id) tab('split-fill', { id, with: b.dataset.fill })
   })
   strip.addEventListener('contextmenu', (e) => {
     const b = (e.target as HTMLElement).closest<HTMLElement>('.wb-tab')

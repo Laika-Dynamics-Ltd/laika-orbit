@@ -334,7 +334,7 @@ export async function handleMission(url, req, res, opts) {
       root = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}').root
     } catch {}
   }
-  // starting a panel runs the repo's config as code, so only folders 1brain already knows as repos
+  // starting a panel runs the repo's config as code, so only folders Laika Orbit already knows as repos
   if (typeof root !== 'string' || !(await opts.allowed()).has(root)) {
     json(res, 403, { error: 'folder is not a known repo' })
     return true

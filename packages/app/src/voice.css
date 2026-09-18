@@ -1,0 +1,31 @@
+/* the composer's mic (voice.ts): a level ring while listening, a spinner dot while transcribing */
+#ss .cx-mic { position: relative }
+#ss .cx-mic.on { color: var(--c-turn) }
+.cx-mic-lvl {
+  position: absolute;
+  inset: 2px;
+  border-radius: 6px;
+  pointer-events: none;
+  opacity: 0;
+}
+.cx-mic.on .cx-mic-lvl {
+  opacity: 1;
+  box-shadow: 0 0 0 calc(1px + var(--lvl, 0) * 3px) color-mix(in srgb, var(--c-turn) 55%, transparent);
+  transition: box-shadow 80ms linear;
+}
+.cx-mic[data-state='work']::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--c-turn);
+  animation: cx-mic-work 0.8s ease-in-out infinite alternate;
+}
+#ss .cx-mic[data-state='err'] { color: var(--c-faint); text-decoration: line-through }
+@keyframes cx-mic-work { to { opacity: 0.2 } }
+@media (prefers-reduced-motion: reduce) {
+  .cx-mic[data-state='work']::after { animation: none }
+}

@@ -1,6 +1,6 @@
 /**
  * The Mission window: Mission Control, the build panel (lanes, checkpoints, verdicts, learning,
- * chat), inside 1brain.
+ * chat), inside Laika Orbit.
  *
  * The panel is its own server (7317, MISSION_URL on the server to change it), so its
  * page is framed as it is rather than re-drawn here: same code, same verdict card, same files
@@ -9,6 +9,7 @@
  * verdict; when it is down the window says so and how to start it, rather than framing an error.
  */
 import './mission.css'
+import * as activity from './activity.ts'
 
 type State = {
   url: string
@@ -84,7 +85,7 @@ export function openMission() {
     overlay.setAttribute('role', 'dialog')
     overlay.setAttribute('aria-label', 'Mission Control')
     overlay.innerHTML = '<div class="mc-win"></div>'
-    // keys pressed on the window's own chrome must not reach 1brain's single-key shortcuts;
+    // keys pressed on the window's own chrome must not reach Laika Orbit's single-key shortcuts;
     // keys inside the frame never leave it
     overlay.addEventListener('keydown', (e) => e.stopPropagation())
     document.body.appendChild(overlay)
@@ -105,10 +106,7 @@ export function watchMission() {
     const detail = s?.up ? (s.waiting ?? 0) : s?.configured || seen ? -1 : -2
     dispatchEvent(new CustomEvent('laika:mission-waiting', { detail }))
   }
-  void tick()
-  setInterval(() => {
-    if (document.visibilityState === 'visible') void tick()
-  }, 15_000)
+  activity.every(15_000, tick)
 }
 
 type Panel = {
@@ -136,7 +134,7 @@ const baseName = (p: string) => p.slice(p.lastIndexOf('/') + 1)
 /**
  * The Build view of a Claude workspace: Mission Control for each repo in it that has a
  * mission.config.mjs of its own (a project folder can hold several; the choice is remembered).
- * A repo's panel is framed wherever it already runs (a launchd service, or one 1brain started);
+ * A repo's panel is framed wherever it already runs (a launchd service, or one Laika Orbit started);
  * otherwise the pane says so and starts one only when asked, because a panel writes .panel/ in
  * the repo and runs its checks on every source save. Each repo keeps its own frame, so switching
  * between them keeps each panel's place.

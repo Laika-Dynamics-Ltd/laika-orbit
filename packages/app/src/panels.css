@@ -1,0 +1,328 @@
+/* The dock, the panels in it, and the rail buttons that open them. See panels.ts for the rules.
+   Nothing here positions a particular panel: a panel author styles the inside of `.pnl-body`
+   and nothing else. */
+
+/* ---------------------------------------------------------------- the dock column ---- */
+/* The dock is one more grid column on `main`, so opening a panel shrinks the stage instead of
+   covering it. These repeat style.css's four rail cases with that column added; `html body`
+   keeps them ahead of the originals whatever order the sheets land in. */
+html body main { grid-template-columns: var(--rail-l, minmax(260px, 20vw)) minmax(0, 1fr) var(--rail-r, minmax(280px, 22vw)) var(--dock-w, 0px) }
+html body.hide-rail-l main { grid-template-columns: 0 minmax(0, 1fr) var(--rail-r, minmax(280px, 22vw)) var(--dock-w, 0px) }
+html body.hide-rail-r main { grid-template-columns: var(--rail-l, minmax(260px, 20vw)) minmax(0, 1fr) 0 var(--dock-w, 0px) }
+html body.hide-rail-l.hide-rail-r main { grid-template-columns: 0 minmax(0, 1fr) 0 var(--dock-w, 0px) }
+
+/* Docked Claude (sessions.css) keeps its own column at the right edge, where #ss is fixed, and
+   rewrites the grid with !important. With Claude docked the dock sits between the map and
+   Claude instead: the same four cases, the dock third and Claude's reserved space last. */
+html body.ss-docked #dock { grid-column: 3; grid-row: 1 }
+html body.ss-docked #rail-r { grid-column: 4; grid-row: 1 }
+html body.ss-docked main { grid-template-columns: var(--rail-l, minmax(260px, 20vw)) minmax(0, 1fr) var(--dock-w, 0px) var(--ss-dock-w, min(620px, 42vw)) !important }
+html body.ss-docked.hide-rail-l main { grid-template-columns: 0 minmax(0, 1fr) var(--dock-w, 0px) var(--ss-dock-w, min(620px, 42vw)) !important }
+html body.ss-docked.ss-wide main { grid-template-columns: 0 minmax(0, 1fr) var(--dock-w, 0px) var(--ss-wide-w, min(1180px, 66vw)) !important }
+html body.ss-docked.ss-wide.ss-wide3 main { grid-template-columns: 0 minmax(0, 1fr) var(--dock-w, 0px) var(--ss-wide3-w, min(1640px, 84vw)) !important }
+
+/* Full-screen Claude is fixed over the whole page, the dock included: with a panel open it stops
+   at the dock's edge, so a panel opened from the rail or a key opens beside it, not under it */
+html body.pnl-dock #ss:not(.dock) { right: var(--dock-w, 0px) }
+
+/* the recall results panel floats over the right of the stage: keep it clear of the dock */
+html body.pnl-dock #panel { right: var(--dock-w, 0px) }
+
+#dock {
+  /* the tiles are placed by panels.ts (tiles.ts decides the shape); the dock is only the room.
+     Its own colour shows in the gaps, like a wallpaper between windows. */
+  position: relative;
+  min-width: 0;
+  /* clip, not hidden: a hidden overflow can still be scrolled by code, and a panel focusing a
+     field while the column is still sliding open scrolls the whole row off to the left */
+  overflow: clip;
+  background: var(--bg);
+}
+
+/* the column slides on the same curve and about the same time as the panels glide in it
+   (panels.ts, MOVE_MS / EASE); a second change retargets it from wherever it is */
+html body main {
+  transition: grid-template-columns .16s cubic-bezier(.05,.7,.1,1), padding-left .16s cubic-bezier(.05,.7,.1,1);
+  /* the left dock (panels.ts, placeLeft) takes its room from the map, like the right one */
+  padding-left: var(--dock-l-w, 0px);
+}
+
+/* the left dock: a row of panels beside the rail, at the widths they want */
+#dock-l {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: var(--dock-l-w, 0px);
+  display: flex;
+  gap: 5px;
+  padding: 6px;
+  box-sizing: border-box;
+  overflow: clip;
+  background: var(--bg);
+  transition: width .16s cubic-bezier(.05,.7,.1,1);
+}
+body:not(.pnl-dock-l) #dock-l { padding: 0 }
+#dock-l > .pnl { flex: 0 0 var(--pw); height: 100% }
+/* its resize edge is on the right, where it meets the map */
+.pnl.left > .pnl-edge { left: auto; right: 0; margin-left: 0; margin-right: -3px }
+/* full Claude starts after it rather than covering it */
+html body.has-wbn.pnl-dock-l #ss:not(.dock) { left: calc(56px + var(--dock-l-w, 0px)) }
+@media (max-width: 700px) { html body.has-wbn.pnl-dock-l #ss:not(.dock) { left: calc(44px + var(--dock-l-w, 0px)) } }
+@media (prefers-reduced-motion: reduce) { html body main { transition: none } }
+/* a panel on its way out takes no clicks */
+.pnl.closing { pointer-events: none }
+
+/* While the column animates the stage must not be re-measured, so nothing inside it moves and
+   the WebGL buffer is reallocated once, at the end (see settleAfter in panels.ts). */
+body.pnl-anim #stage canvas { pointer-events: none }
+body.pnl-resizing, body.pnl-dragging { cursor: default; user-select: none }
+body.pnl-resizing { cursor: col-resize }
+body.pnl-resizing-y { cursor: row-resize }
+
+/* ------------------------------------------------------------------- a panel frame ---- */
+.pnl {
+  --pw: 480px;
+  position: relative;
+  flex: 0 0 var(--pw);
+  width: var(--pw);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--pan);
+  border: 1px solid var(--ln);
+  border-radius: 10px;
+  overflow: hidden;
+  outline: none;
+}
+.pnl[hidden] { display: none }
+
+/* a tile: right-anchored, so the column sliding wider never moves the panels already open */
+#dock > .pnl {
+  position: absolute;
+  right: var(--tr, 0px);
+  top: var(--ty, 0px);
+  height: var(--th, 100%);
+  flex: none;
+}
+
+/* the focused panel wears the ring; the rest stay calm. A ring, not a thicker border, so
+   focusing never shifts a pixel of content. */
+.pnl.focused {
+  border-color: color-mix(in srgb, var(--acc) 80%, var(--ln));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--acc) 55%, transparent), 0 0 22px -6px color-mix(in srgb, var(--acc) 45%, transparent);
+}
+.pnl.focused .pnl-title { color: var(--tx) }
+.pnl:not(.focused) .pnl-title { color: var(--dim) }
+body:not(.pnl-dock) .pnl.focused:not(.float) { box-shadow: none }
+
+.pnl-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  height: 34px;
+  padding: 0 6px 0 10px;
+  background: var(--pan2);
+  border-bottom: 1px solid var(--ln);
+  cursor: grab;
+}
+body.pnl-dragging .pnl-bar { cursor: grabbing }
+.pnl-grip {
+  width: 9px;
+  height: 14px;
+  flex: none;
+  opacity: .5;
+  background-image: radial-gradient(currentColor 1px, transparent 1px);
+  background-size: 4px 4px;
+  color: var(--dim2);
+}
+.pnl-title {
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--tx);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pnl-fill { flex: 1 1 auto }
+/* which workspace a panel is on, when it is on just one: the project tab's own colour */
+.pnl-ws {
+  flex: none;
+  max-width: 140px;
+  padding: 1px 7px;
+  border: 1px solid color-mix(in srgb, var(--ws, var(--acc)) 45%, transparent);
+  border-radius: 999px;
+  color: color-mix(in srgb, var(--ws, var(--acc)) 80%, var(--tx));
+  font-size: 10.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pnl-ws[hidden] { display: none }
+.pnl-ic {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  flex: none;
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  color: var(--dim2);
+  font: 400 17px/1 ui-sans-serif, system-ui;
+  cursor: pointer;
+}
+.pnl-ic:hover { background: var(--n6); color: var(--tx) }
+.pnl-ic:focus-visible { outline: 2px solid var(--acc); outline-offset: 1px }
+
+.pnl-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  position: relative;
+}
+/* a panel whose content is a whole view (History, Databases) fills the body rather than
+   positioning itself against the window */
+.pnl-body > .pnl-fillview {
+  position: static;
+  inset: auto;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  transform: none;
+  visibility: visible;
+  opacity: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ------------------------------------------------------------------ the drag edge ---- */
+.pnl-edge {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 7px;
+  margin-left: -3px;
+  z-index: 4;
+  cursor: col-resize;
+  touch-action: none;
+}
+.pnl-edge::after {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: transparent;
+  transition: background .12s;
+}
+.pnl-edge:hover::after, .pnl-edge.active::after, .pnl-edge:focus-visible::after { background: var(--acc) }
+.pnl-edge.snap::after { background: var(--ok); width: 2px }
+
+/* a tile in a stack also has a bottom edge, which moves the line between it and the next */
+.pnl-edge-y { display: none }
+#dock > .pnl.stacked > .pnl-edge-y {
+  display: block;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 7px;
+  z-index: 4;
+  cursor: row-resize;
+  touch-action: none;
+}
+#dock > .pnl.stacked > .pnl-edge-y:hover { background: linear-gradient(transparent 3px, var(--acc) 3px, var(--acc) 4px, transparent 4px) }
+
+/* ------------------------------------------------------- collapsed to an icon strip ---- */
+.pnl-stub {
+  display: none;
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  background: var(--pan2);
+  border: 0;
+  color: var(--dim);
+  cursor: pointer;
+  font: inherit;
+}
+.pnl.collapsed .pnl-stub { display: flex }
+.pnl.collapsed .pnl-bar, .pnl.collapsed .pnl-body { visibility: hidden }
+.pnl-stub span {
+  writing-mode: vertical-rl;
+  font-size: 11px;
+  letter-spacing: .04em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pnl-stub:hover { color: var(--tx); background: var(--n6) }
+
+/* ----------------------------------------------------------------------- floating ---- */
+/* Floats sit over everything tiled, the chats pane included (70) and the rail (75), and under
+   menus and sheets (80+). no-drag: in the desktop shell a float partly over the top bar must
+   still take the pointer rather than hand it to the window. */
+.pnl.float {
+  position: fixed;
+  z-index: 78;
+  -webkit-app-region: no-drag;
+  flex: none;
+  height: 520px;
+  border: 1px solid var(--n15);
+  border-radius: 12px;
+  box-shadow: 0 18px 54px color-mix(in srgb, var(--n0) 60%, transparent);
+}
+.pnl.float .pnl-bar { border-radius: 12px 12px 0 0 }
+.pnl.float .pnl-edge { display: none }
+/* fullscreen: over the floats too, square to the work area */
+.pnl.float.max { z-index: 79; box-shadow: 0 24px 80px color-mix(in srgb, var(--n0) 70%, transparent) }
+
+/* ------------------------------------------------------------------------- peeking ---- */
+/* A peek costs a composite and no layout: same element, absolute over the stage, slid in. */
+.pnl.peek {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  left: auto;
+  z-index: 30;
+  flex: none;
+  border-left: 1px solid var(--n15);
+  box-shadow: -14px 0 40px color-mix(in srgb, var(--n0) 45%, transparent);
+  transform: translateX(100%);
+  transition: transform .18s ease;
+}
+.pnl.peek.peek-in { transform: none }
+/* a left panel peeks in from the left, beside the rail */
+.pnl.peek.left { left: 0; right: auto; transform: translateX(-100%); border-left: 0; border-right: 1px solid var(--n15) }
+.pnl.peek.left.peek-in { transform: none }
+.pnl.peek .pnl-edge { display: none }
+
+@media (prefers-reduced-motion: reduce) {
+  .pnl.peek { transition: none }
+}
+
+/* ------------------------------------------------------------- the rail's buttons ---- */
+/* The buttons themselves are the workbench rail's (#wbn button in workbench.css); these are
+   only the extras a panel button has: a badge, the floating mark, and the group slots. */
+#wbn .wbn-slot { display: contents }
+#wbn button .wbn-badge[data-tone='warn'] { background: var(--warn) }
+#wbn button .wbn-badge[data-tone='err'] { background: var(--err) }
+#wbn button.floating::before { background: var(--dim2) }
+#wbn.drop { box-shadow: inset -3px 0 0 var(--acc) }
+
+/* ----------------------------------------------------------------- header chrome ---- */
+.chrome-slot { display: flex; align-items: center; gap: 6px }

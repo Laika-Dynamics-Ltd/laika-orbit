@@ -1,4 +1,4 @@
-# laika-1brain — operating manual
+# Laika Orbit — operating manual
 
 This knowledge base is read by an agent, not by a person browsing folders. Routing beats hierarchy.
 
@@ -24,6 +24,6 @@ The description is scored, so write it for retrieval, not for prose.
 
 ## Departments
 
-- Reference: brain/routers/ENGINEERING.md — the 1brain build itself
+- Reference: brain/routers/ENGINEERING.md — the Laika Orbit build itself
 - Reference: brain/routers/CONTENT.md — research, video, publishing
 - Reference: brain/routers/CLIENTS.md — client engagements

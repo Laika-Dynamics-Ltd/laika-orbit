@@ -1,0 +1,4 @@
+#!/bin/sh
+# ffmpeg, offloaded to the least busy Laika Orbit machine when that is worth it (see ../../ffmpeg-offload.mjs).
+# Put this folder first on PATH:  PATH="/path/to/packages/app/bin/path:$PATH"
+exec node "$(cd "$(dirname "$0")" && pwd)/../../ffmpeg-offload.mjs" "$@"

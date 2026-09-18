@@ -8,7 +8,7 @@
  *             baseline, because an agent cannot read half a file — it reads the
  *             file and every line of it counts against the window.
  *
- *   1BRAIN    the packed prompt `recall` produces: question + the sliced
+ *   RECALL    the packed prompt `recall` produces: question + the sliced
  *             sections + one instruction, capped at 9KB.
  *
  * Tokens are estimated at 4 bytes/token. That is an approximation, not a
@@ -116,7 +116,7 @@ console.log(
   `\ncorpus: ${index.docs.length} docs · ${index.routerCount} routers · ${index.pointerCount} pointers`,
 )
 console.log(`token estimate: ${BYTES_PER_TOKEN} bytes/token (approximate, not a tokeniser)\n`)
-console.log('question                                   grep-hits  read  baseline  1brain   saving')
+console.log('question                                   grep-hits  read  baseline  recall   saving')
 console.log('─'.repeat(88))
 for (const r of rows) {
   const save = r.baseTokens ? `${((1 - r.brainTokens / r.baseTokens) * 100).toFixed(0)}%` : '—'

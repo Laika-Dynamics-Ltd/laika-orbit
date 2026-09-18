@@ -1,4 +1,4 @@
-# laika-1brain — build plan
+# Laika Orbit — build plan
 
 A deterministic, zero-token retrieval engine over a markdown knowledge base, plus a three.js
 graph over the whole workspace. Local-first, with the storage layer kept swappable so it can
@@ -29,10 +29,10 @@ Research this is based on: [`research/notes/findings.md`](research/notes/finding
 ## Architecture
 
 ```
-laika-1brain/
+laika-orbit/
 ├── packages/
 │   ├── core/          # indexer + recall engine. Zero runtime deps. The actual IP.
-│   ├── cli/           # 1brain index | recall | ask | lint | serve
+│   ├── cli/           # laikaorbit index | recall | ask | lint | serve
 │   ├── mcp/           # MCP server wrapping core — what Claude Code talks to
 │   └── graph/         # three.js viewer (Vite + TS)
 ├── brain/             # the knowledge base itself
@@ -99,7 +99,7 @@ Golden-file tests: a fixture brain + ~30 question/expected-file pairs, asserted 
 Wrap `core` as MCP tools: `recall(question)`, `get(path)`, `status()`. Register with Claude Code.
 This is where the token saving actually lands — Claude stops using `grep`/`glob` and calls `recall`.
 
-**Benchmark here**, the same way he did: same question against a plain session and a 1brain session,
+**Benchmark here**, the same way he did: same question against a plain session and a session with Laika Orbit recall,
 compare `/context`. We should reproduce something near the 50k → 30k result. If we don't, the router
 files are the problem, not the engine.
 
@@ -173,7 +173,7 @@ we can just use this today.
    HTML (iterate on the plan, ~1 min, not the render, ~15 min). These are the whole reason the
    pipeline is affordable.
 
-## Three ideas to steal into 1brain proper
+## Three ideas to steal into Laika Orbit proper
 
 These are domain-independent and belong in the main build, not just the video skill:
 

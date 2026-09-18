@@ -1,0 +1,770 @@
+/*
+ * Autopilot: the chip in the chrome and the five views, each of which is a panel.
+ *
+ * Theme ramp tokens only (--n0..--n37, --acc, --tx, --dim, --ok, --warn, --err), every class
+ * prefixed .ap-, and nothing here positions a view: the panel system does that.
+ */
+
+/* ------------------------------------------------------------- the chip ---- */
+.ap-control.ap-compact {
+  display: flex;
+  align-items: center;
+}
+.ap-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--n8);
+  border-radius: 13px;
+  background: var(--n3);
+  color: var(--dim);
+  font: inherit;
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ap-chip:hover {
+  border-color: var(--n14);
+  color: var(--tx);
+}
+.ap-chip b {
+  color: var(--tx);
+  font-weight: 600;
+}
+.ap-chip .ap-chip-l {
+  opacity: 0.75;
+}
+.ap-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--n14);
+  box-shadow: 0 0 0 2px var(--n3);
+}
+[data-mode='on'] .ap-dot {
+  background: var(--ok);
+  animation: ap-pulse 2.6s ease-in-out infinite;
+}
+[data-mode='away'] .ap-dot {
+  background: var(--acc);
+  animation: ap-pulse 2.6s ease-in-out infinite;
+}
+[data-mode='halted'] .ap-dot {
+  background: var(--err);
+}
+[data-mode='halted'] .ap-chip {
+  border-color: color-mix(in srgb, var(--err) 55%, transparent);
+}
+@keyframes ap-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ap-dot {
+    animation: none !important;
+  }
+}
+.ap-clock {
+  font-style: normal;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+.ap-badge {
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--warn);
+  color: var(--n0);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 15px;
+  text-align: center;
+}
+
+/* ------------------------------------------------------------ the views ---- */
+/* each view is a panel now (autopilot-panels.ts): the panel frame is its chrome, and this is only
+   the inside of the body */
+.ap-view {
+  padding: 14px;
+  color: var(--tx);
+  font-size: 12.5px;
+}
+
+/* ----------------------------------------------------------- the control --- */
+.ap-seg {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--n8);
+  border-radius: 9px;
+  background: var(--n1);
+}
+.ap-seg button {
+  padding: 8px 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--dim);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.ap-seg button:hover:not(:disabled) {
+  color: var(--tx);
+  background: var(--n5);
+}
+.ap-seg button.on {
+  background: var(--acc);
+  color: var(--acc-ink, var(--n0));
+  font-weight: 600;
+}
+.ap-hint {
+  margin: 9px 2px 4px;
+  color: var(--dim);
+  line-height: 1.45;
+}
+.ap-may {
+  margin: 0 0 12px;
+  padding: 0 0 0 16px;
+  color: var(--tx);
+  line-height: 1.7;
+  font-size: 12px;
+}
+.ap-may li::marker {
+  color: var(--acc);
+}
+.ap-nums {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
+  gap: 8px;
+  margin: 0 0 12px;
+}
+.ap-nums div {
+  padding: 8px 10px;
+  border: 1px solid var(--n8);
+  border-radius: 8px;
+  background: var(--n1);
+}
+.ap-nums dt {
+  color: var(--dim);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.ap-nums dd {
+  margin: 3px 0 0;
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+}
+.ap-nums dd i {
+  color: var(--dim);
+  font-size: 11px;
+  font-style: normal;
+}
+.ap-lead {
+  margin: 0 0 12px;
+  padding: 9px 11px;
+  border-left: 2px solid var(--acc);
+  background: var(--n1);
+  color: var(--tx);
+  line-height: 1.5;
+}
+.ap-lead.none {
+  border-left-color: var(--n14);
+  color: var(--dim);
+}
+.ap-lead span {
+  display: block;
+  color: var(--dim);
+  margin-top: 3px;
+}
+.ap-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.ap-links button {
+  padding: 6px 11px;
+  border: 1px solid var(--n8);
+  border-radius: 7px;
+  background: var(--n3);
+  color: var(--tx);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.ap-links button:hover {
+  border-color: var(--acc);
+}
+.ap-links button b {
+  color: var(--warn);
+}
+.ap-kill {
+  width: 100%;
+  padding: 11px;
+  border: 1px solid color-mix(in srgb, var(--err) 60%, transparent);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--err) 14%, transparent);
+  color: var(--err);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.ap-kill:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--err) 26%, transparent);
+}
+.ap-kill.released {
+  border-color: var(--n14);
+  background: var(--n3);
+  color: var(--tx);
+}
+.ap-kill-hint,
+.ap-ask-b {
+  margin: 7px 2px 0;
+  color: var(--dim);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.ap-halted {
+  margin: 0 0 12px;
+  padding: 9px 11px;
+  border: 1px solid color-mix(in srgb, var(--err) 55%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--err) 12%, transparent);
+  line-height: 1.5;
+}
+.ap-err {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--err) 16%, transparent);
+  color: var(--err);
+}
+.ap-saved {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--ok) 14%, transparent);
+  color: var(--ok);
+}
+.ap-warn {
+  margin: 0 0 10px;
+  color: var(--warn);
+}
+.ap-load,
+.ap-empty,
+.ap-none {
+  color: var(--dim);
+  padding: 10px 2px;
+}
+
+/* -------------------------------------------------------------- the views -- */
+.ap-head {
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--n8);
+}
+.ap-head b {
+  font-size: 13.5px;
+}
+.ap-head p {
+  margin: 5px 0 0;
+  color: var(--dim);
+  line-height: 1.5;
+}
+.ap-head .ap-out {
+  margin-left: 8px;
+  color: var(--warn);
+}
+.ap-rows,
+.ap-decs,
+.ap-acts-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* fleet rows */
+.ap-row {
+  padding: 10px 11px;
+  border: 1px solid var(--n8);
+  border-left: 2px solid var(--n14);
+  border-radius: 8px;
+  background: var(--n1);
+}
+.ap-row.st-running {
+  border-left-color: var(--cyan, var(--acc));
+}
+.ap-row.st-error {
+  border-left-color: var(--err);
+}
+.ap-row.need {
+  border-left-color: var(--warn);
+}
+.ap-row-top {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+.ap-row-t {
+  font-weight: 600;
+}
+.ap-row em,
+.ap-dec-top em,
+.ap-act em {
+  font-style: normal;
+  color: var(--dim);
+  font-size: 11px;
+}
+.ap-tag {
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: var(--n5);
+  color: var(--dim);
+  font-size: 10.5px;
+}
+.ap-state {
+  margin-left: auto;
+  color: var(--dim);
+  font-size: 11px;
+}
+.ap-eta {
+  color: var(--acc);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.ap-status {
+  margin: 5px 0 0;
+  color: var(--tx);
+  line-height: 1.45;
+}
+.ap-sent {
+  margin: 7px 0 0;
+  padding: 7px 9px;
+  border-radius: 6px;
+  background: var(--n3);
+  color: var(--tx);
+  line-height: 1.5;
+  font-size: 11.5px;
+}
+.ap-sent.none {
+  background: none;
+  padding: 7px 0 0;
+  color: var(--dim);
+}
+.ap-sent b {
+  color: var(--acc);
+}
+.ap-sent i {
+  display: block;
+  margin-top: 3px;
+  color: var(--dim);
+}
+.ap-waits {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 7px 0 0;
+  font-size: 11px;
+  color: var(--dim);
+}
+.ap-waits .ap-d {
+  color: var(--warn);
+}
+.ap-waiting {
+  margin: 6px 0 0;
+  color: var(--acc);
+  font-size: 11.5px;
+}
+
+/* decisions */
+.ap-dec {
+  padding: 10px 11px;
+  border: 1px solid var(--n8);
+  border-radius: 8px;
+  background: var(--n1);
+}
+.ap-dec.out {
+  border-color: color-mix(in srgb, var(--warn) 55%, transparent);
+  background: color-mix(in srgb, var(--warn) 7%, var(--n1));
+}
+.ap-dec.sent {
+  opacity: 0.5;
+}
+.ap-dec-top {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+.ap-dec-t {
+  font-weight: 600;
+}
+.ap-kind {
+  padding: 1px 7px;
+  border-radius: 6px;
+  background: var(--n5);
+  color: var(--dim);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.ap-dec.out .ap-kind {
+  background: var(--warn);
+  color: var(--n0);
+  font-weight: 700;
+}
+.ap-when {
+  margin-left: auto;
+  color: var(--dim);
+  font-size: 11px;
+}
+.ap-what {
+  margin: 6px 0 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+.ap-why {
+  margin: 5px 0 0;
+  color: var(--dim);
+  line-height: 1.45;
+}
+.ap-why.none {
+  opacity: 0.6;
+}
+.ap-acts {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 9px;
+}
+.ap-acts button {
+  padding: 6px 12px;
+  border: 1px solid var(--n8);
+  border-radius: 7px;
+  background: var(--n3);
+  color: var(--tx);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.ap-acts button[data-do='yes'] {
+  border-color: var(--acc);
+  background: var(--acc);
+  color: var(--acc-ink, var(--n0));
+  font-weight: 600;
+}
+.ap-acts button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.ap-always {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px !important;
+}
+.ap-acts-note {
+  margin: 8px 0 0;
+  color: var(--dim);
+}
+
+/* policy */
+.ap-override {
+  margin-bottom: 14px;
+  padding: 11px 12px;
+  border: 1px solid color-mix(in srgb, var(--warn) 60%, transparent);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+}
+.ap-override.ok {
+  border-color: color-mix(in srgb, var(--ok) 45%, transparent);
+  background: color-mix(in srgb, var(--ok) 8%, transparent);
+}
+.ap-override h4,
+.ap-budget h4,
+.ap-repos h4,
+.ap-list h4 {
+  margin: 0 0 5px;
+  font-size: 12.5px;
+}
+.ap-override p,
+.ap-budget p,
+.ap-repos p {
+  margin: 0 0 8px;
+  color: var(--dim);
+  line-height: 1.5;
+}
+.ap-override ul,
+.ap-repos ul,
+.ap-list ul,
+.ap-defaults ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ap-override li,
+.ap-repos li,
+.ap-list li {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+.ap-policy code {
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: var(--n5);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+.ap-override button,
+.ap-list li button,
+.ap-repos li button {
+  padding: 3px 9px;
+  border: 1px solid var(--n8);
+  border-radius: 6px;
+  background: var(--n3);
+  color: var(--dim);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.ap-override button:hover,
+.ap-list li button:hover,
+.ap-repos li button:hover {
+  color: var(--tx);
+  border-color: var(--acc);
+}
+.ap-budget,
+.ap-repos,
+.ap-list {
+  margin-bottom: 14px;
+}
+.ap-list h4 i {
+  color: var(--dim);
+  font-style: normal;
+  font-size: 11px;
+}
+.ap-fields {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: end;
+}
+.ap-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  color: var(--dim);
+  font-size: 11px;
+}
+.ap-fields input {
+  width: 92px;
+  padding: 6px 8px;
+  border: 1px solid var(--n8);
+  border-radius: 7px;
+  background: var(--n1);
+  color: var(--tx);
+  font: inherit;
+  font-size: 12px;
+}
+.ap-fields button {
+  padding: 7px 14px;
+  border: 1px solid var(--acc);
+  border-radius: 7px;
+  background: var(--acc);
+  color: var(--acc-ink, var(--n0));
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.ap-spent {
+  margin: 8px 0 0;
+  color: var(--dim);
+}
+.ap-defaults {
+  color: var(--dim);
+}
+.ap-defaults summary {
+  cursor: pointer;
+  padding: 6px 0;
+}
+.ap-defaults ul {
+  margin: 6px 0;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* timeline */
+.ap-filters {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.ap-filters button {
+  padding: 3px 9px;
+  border: 1px solid var(--n8);
+  border-radius: 12px;
+  background: none;
+  color: var(--dim);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.ap-filters button.on {
+  background: var(--n5);
+  color: var(--tx);
+  border-color: var(--n14);
+}
+.ap-act {
+  display: flex;
+  gap: 10px;
+  padding: 9px 11px;
+  border: 1px solid var(--n8);
+  border-radius: 8px;
+  background: var(--n1);
+}
+.ap-act.undone {
+  opacity: 0.6;
+}
+.ap-act .ap-when {
+  margin: 0;
+  flex: 0 0 62px;
+  font-variant-numeric: tabular-nums;
+}
+.ap-act-b {
+  flex: 1;
+  min-width: 0;
+}
+.ap-act-t {
+  margin: 0;
+  line-height: 1.45;
+  word-break: break-word;
+}
+.ap-act-t b {
+  color: var(--acc);
+}
+.ap-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10.5px;
+  color: var(--dim);
+}
+.ap-undo {
+  margin-top: 7px;
+  padding: 4px 11px;
+  border: 1px solid var(--n8);
+  border-radius: 7px;
+  background: var(--n3);
+  color: var(--tx);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.ap-undo:hover:not(:disabled) {
+  border-color: var(--acc);
+}
+.ap-undo:disabled {
+  opacity: 0.5;
+}
+.ap-nofix,
+.ap-undone {
+  margin: 6px 0 0;
+  color: var(--dim);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+/* --------------------------------------------------------------- the ask --- */
+.ap-ask {
+  position: fixed;
+  inset: 0;
+  z-index: 59;
+  display: grid;
+  place-items: center;
+  background: rgb(0 0 0 / 0.45);
+}
+.ap-ask .dlg {
+  width: min(430px, 92vw);
+  padding: 18px;
+  border: 1px solid var(--n8);
+  border-radius: 12px;
+  background: var(--n2);
+  color: var(--tx);
+  font-size: 12.5px;
+}
+.ap-ask .dlg b {
+  font-size: 14px;
+}
+.ap-ask .dlg p {
+  margin: 8px 0 12px;
+  color: var(--dim);
+  line-height: 1.5;
+}
+.ap-ask label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 10px;
+  color: var(--dim);
+}
+.ap-ask input {
+  padding: 7px 9px;
+  border: 1px solid var(--n8);
+  border-radius: 7px;
+  background: var(--n1);
+  color: var(--tx);
+  font: inherit;
+  font-size: 12.5px;
+}
+.ap-ask input[data-aw='hours'] {
+  width: 64px;
+}
+.ap-ask .dlg-in {
+  width: 100%;
+  box-sizing: border-box;
+}
+.ap-ask .dlg-acts {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+.ap-ask .ac-btn {
+  padding: 8px 15px;
+  border: 1px solid var(--n8);
+  border-radius: 8px;
+  background: var(--n3);
+  color: var(--tx);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.ap-ask .ac-btn.go {
+  border-color: var(--acc);
+  background: var(--acc);
+  color: var(--acc-ink, var(--n0));
+  font-weight: 600;
+}

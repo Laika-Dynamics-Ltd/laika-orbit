@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "1brain": {
+    "laikaorbit": {
       "command": "node",
       "args": ["packages/mcp/src/index.ts"],
       "env": { "BRAIN_ROOT": "." }

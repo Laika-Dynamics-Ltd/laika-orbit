@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * MCP server over the 1brain recall engine.
+ * MCP server over the Laika Orbit recall engine.
  *
  * This is where the token saving actually lands: Claude stops burning model turns
  * on grep/glob and whole-file reads, and calls `recall` instead.
@@ -38,12 +38,12 @@ async function index(): Promise<BrainIndex> {
   return cached
 }
 
-const server = new McpServer({ name: '1brain', version: '0.1.0' })
+const server = new McpServer({ name: 'laikaorbit', version: '0.1.0' })
 
 server.registerTool(
   'recall',
   {
-    title: 'Recall from the 1brain knowledge base',
+    title: 'Recall from the Laika Orbit knowledge base',
     description:
       'Deterministic, zero-token retrieval over the local markdown knowledge base. ' +
       'Returns the exact section that answers the question plus its source path. ' +
@@ -89,7 +89,7 @@ server.registerTool(
 server.registerTool(
   'status',
   {
-    title: '1brain index status',
+    title: 'Laika Orbit recall index status',
     description: 'Index size and health.',
     inputSchema: {},
   },

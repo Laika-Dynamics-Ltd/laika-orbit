@@ -8,6 +8,7 @@
  */
 import { calendarBody, calendarCompact } from './calendar.ts'
 import { glyph, hasGlyph, KIND_GLYPH } from './glyphs.ts'
+import { type Summary, summaryBody, summaryCompact } from './summary-card.ts'
 
 export { tickClocks } from './calendar.ts'
 
@@ -35,7 +36,7 @@ export type WidgetAction = { label: string; action?: string; href?: string }
 
 export type Widget = {
   id: string
-  kind: 'calendar' | 'metric' | 'table' | 'deck' | 'applist' | 'list' | 'feed' | 'links'
+  kind: 'calendar' | 'metric' | 'table' | 'deck' | 'applist' | 'list' | 'feed' | 'links' | 'summary'
   title: string
   source: string
   refreshedAt?: string
@@ -239,6 +240,8 @@ function compactBody(w: Widget): string {
   switch (w.kind) {
     case 'calendar':
       return calendarCompact(w)
+    case 'summary':
+      return summaryCompact((c.summary as Summary | undefined) ?? null)
     case 'metric': {
       const segs = (c.segments as Segment[] | undefined) ?? []
       const total = segs.reduce((a, s) => a + s.n, 0) || 1
@@ -303,15 +306,20 @@ export function renderWidget(src: Widget): string {
   const body =
     w.kind === 'calendar'
       ? calendarBody(w)
-      : w.kind === 'metric'
-        ? metricBody(w)
-        : w.kind === 'table'
-          ? tableBody(w)
-          : w.kind === 'deck'
-            ? deckBody(w)
-            : w.kind === 'applist'
-              ? appListBody(w)
-              : listBody(w)
+      : w.kind === 'summary'
+        ? summaryBody((w.config?.summary as Summary | undefined) ?? null, {
+            nextAt: w.config?.nextAt as number | null,
+            recap: w.config?.recap as Summary | null,
+          })
+        : w.kind === 'metric'
+          ? metricBody(w)
+          : w.kind === 'table'
+            ? tableBody(w)
+            : w.kind === 'deck'
+              ? deckBody(w)
+              : w.kind === 'applist'
+                ? appListBody(w)
+                : listBody(w)
 
   const title = w.href
     ? `<a href="${esc(w.href)}" target="_blank" rel="noopener">${esc(w.title)}</a>`

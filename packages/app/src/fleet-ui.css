@@ -1,0 +1,119 @@
+/* fleet-ui.ts: the broadcast dialog, and a chat's background work with its ETA */
+
+/* ◷ 2 in the background  Run build ~3m left · 25%  ·  Explore 40s in */
+.m-bg {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 2px 6px;
+  color: var(--c-dim);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.m-bg .bg-glyph { width: 1em; flex: none; text-align: center; font-style: normal; color: var(--c-run) }
+.m-bg .bg-lbl { flex: none; color: var(--c-faint) }
+.m-bg .bg-t { min-width: 0; overflow: hidden; text-overflow: ellipsis }
+.m-bg .bg-t b { font-weight: 600; color: var(--c-text) }
+.m-bg .bg-sep { font-style: normal; color: var(--c-faint) }
+
+/* the few characters on a chat tab or row */
+#ss .ws-eta, #ss .cw-eta {
+  flex: none;
+  margin-left: 4px;
+  font-style: normal;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--c-run);
+}
+#ss .bc-open .ss-ic-t { font-size: 13px }
+
+.bc-dlg {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: color-mix(in srgb, var(--n0) 62%, transparent);
+}
+.bc-dlg .bc {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(560px, 100%);
+  max-height: min(720px, 100%);
+  padding: 16px 18px 14px;
+  border: 1px solid var(--c-line);
+  border-radius: 12px;
+  background: var(--n5);
+  box-shadow: 0 24px 60px color-mix(in srgb, var(--n0) 70%, transparent);
+}
+.bc header { display: flex; align-items: baseline; gap: 10px }
+.bc header b { font-size: 15px; font-weight: 650 }
+.bc header span { color: var(--c-dim); font-size: 12.5px }
+.bc-pick, .bc-cmds { display: flex; flex-wrap: wrap; gap: 6px }
+.bc-pick button, .bc-cmds button {
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid var(--c-line);
+  border-radius: 6px;
+  background: none;
+  color: var(--c-dim);
+  font-size: 12px;
+  cursor: pointer;
+}
+.bc-cmds button { font-family: ui-monospace, Menlo, monospace; color: var(--c-text) }
+.bc-pick button:hover, .bc-cmds button:hover { border-color: var(--n21); color: var(--c-text) }
+.bc-list {
+  min-height: 60px;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  list-style: none;
+  border: 1px solid var(--c-line);
+  border-radius: 8px;
+  background: var(--n2);
+}
+.bc-list label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 5px 6px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.bc-list label:hover { background: var(--n6) }
+.bc-list input { flex: none; margin: 0; accent-color: var(--c-turn) }
+.bc-st { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--c-faint) }
+.bc-st.st-running, .bc-st.st-starting { background: var(--c-run) }
+.bc-st.st-waiting { background: var(--c-turn) }
+.bc-st.st-error { background: var(--c-no) }
+.bc-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--c-text) }
+.bc-list em { flex: none; font-style: normal; font-size: 11.5px; color: var(--c-faint) }
+.bc-list .bc-tag { padding: 0 5px; border: 1px solid var(--c-line); border-radius: 4px }
+.bc-list .bc-need { color: var(--c-turn) }
+.bc-list small { flex: none; margin-left: auto; color: var(--c-dim); font-size: 11.5px; font-variant-numeric: tabular-nums }
+.bc-empty { padding: 10px; color: var(--c-dim); font-size: 13px }
+.bc-cx { border: 1px solid var(--c-line); border-radius: 8px; background: var(--n2); padding: 6px 8px 4px }
+.bc-cx textarea {
+  width: 100%;
+  resize: vertical;
+  border: 0;
+  outline: none;
+  background: none;
+  color: var(--c-text);
+  font: inherit;
+  font-size: 13px;
+}
+.bc-cx .cx-bar { display: flex; align-items: center; gap: 4px }
+.bc-err { margin: 0; color: var(--c-no); font-size: 12.5px }
+.bc .dlg-acts { margin-top: 0 }
+#ss .bc .ac-btn.go:disabled { opacity: 0.5; cursor: default }
+
+/* the chat's own run (runs.ts mountStrip), one line under the background work */
+.m-run { padding: 2px 0 8px }
+.m-run:empty { display: none }

@@ -1,0 +1,376 @@
+/*
+ * The cockpit (cockpit.ts): lanes of chats, each a node with its queue below. No position, width
+ * or z-index of its own: the conductor window and the Cockpit panel size it. Ramp and tone tokens
+ * only, so every theme gets it right. Motion: 140ms, nothing that bounces, nothing while hidden.
+ */
+.ck {
+  --ck-bg: var(--n2);
+  --ck-card: color-mix(in srgb, var(--n6) 88%, transparent);
+  --ck-line: var(--n16);
+  --ck-tx: var(--n35);
+  --ck-dim: var(--n29);
+  --ck-faint: var(--n24);
+  --ck-run: var(--cyan, var(--info));
+  --ck-you: var(--warn);
+  --ck-err: var(--err);
+  --ck-idle: var(--n24);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  color: var(--ck-tx);
+  font: 400 12.5px/1.4 system-ui, -apple-system, sans-serif;
+}
+.ck * { box-sizing: border-box }
+.ck.off *, .ck.off *::before, .ck.off *::after { animation: none !important; transition: none !important }
+
+.ck-lanes {
+  display: flex;
+  gap: 10px;
+  min-height: 0;
+  flex: 1;
+  padding: 10px 12px 12px;
+  overflow: auto;
+  scrollbar-width: thin;
+  align-items: stretch;
+}
+.ck[data-empty] .ck-lanes::before {
+  content: attr(data-empty);
+  align-self: center;
+  color: var(--ck-faint);
+}
+.ck.connecting .ck-lanes { opacity: 0.55 }
+
+/* ------------------------------------------------------------------ a lane */
+.ck-lane {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 204px;
+  min-width: 0;
+  min-height: 0;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  transition: background 140ms, border-color 140ms;
+}
+.ck-lane.over { background: color-mix(in srgb, var(--info) 7%, transparent); border-color: color-mix(in srgb, var(--info) 40%, transparent) }
+.ck-lane.pile { flex-basis: 200px }
+
+/* the node: the chat, as the strip shows it */
+.ck-node {
+  --tone: var(--ck-idle);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  padding: 9px 11px 10px;
+  border: 1px solid var(--ck-line);
+  border-radius: 10px;
+  background: var(--ck-card);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  position: relative;
+  transition: border-color 140ms, background 140ms;
+}
+.ck-node::before {
+  /* the lane's arc: a thread from the node down into its queue */
+  content: '';
+  position: absolute;
+  left: 15px;
+  top: 100%;
+  width: 1px;
+  height: 10px;
+  background: color-mix(in srgb, var(--tone) 55%, var(--ck-line));
+}
+.ck-node:hover { border-color: color-mix(in srgb, var(--tone) 50%, var(--ck-line)); background: color-mix(in srgb, var(--tone) 5%, var(--ck-card)) }
+.ck-node:focus-visible { outline: 2px solid var(--info); outline-offset: 1px }
+.ck-node.t-run { --tone: var(--ck-run) }
+.ck-node.t-you { --tone: var(--ck-you); border-color: color-mix(in srgb, var(--ck-you) 45%, var(--ck-line)) }
+.ck-node.t-err { --tone: var(--ck-err); border-color: color-mix(in srgb, var(--ck-err) 40%, var(--ck-line)) }
+.ck-node.pile { cursor: default; border-style: dashed; background: transparent }
+.ck-node.pile::before { display: none }
+
+.ck-row1 { display: flex; align-items: center; gap: 7px; min-width: 0 }
+.ck-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--tone, var(--ck-idle)) }
+.ck-node.t-run .ck-dot { box-shadow: 0 0 0 3px color-mix(in srgb, var(--ck-run) 22%, transparent) }
+.ck-node.t-you .ck-dot { box-shadow: 0 0 0 3px color-mix(in srgb, var(--ck-you) 25%, transparent) }
+.ck-node.pile .ck-dot { background: none; border: 1px dashed var(--ck-faint) }
+.ck-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; font-size: 13px; letter-spacing: -0.005em }
+/* the state, and how long it has been in it: the first thing to read after the name */
+.ck-pill {
+  flex: none;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--tone);
+  background: color-mix(in srgb, var(--tone) 13%, transparent);
+  white-space: nowrap;
+}
+.ck-node.t-idle .ck-pill { color: var(--ck-dim); background: color-mix(in srgb, var(--ck-dim) 10%, transparent) }
+.ck-pill em { font-style: normal; font-weight: 500; opacity: 0.75; font-variant-numeric: tabular-nums }
+.ck-row2 { display: flex; align-items: center; gap: 7px; min-width: 0; margin-top: 3px }
+.ck-repo { min-width: 0; color: var(--ck-faint); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+
+/* what it is doing, what it needs, why it stopped, or what it last said: two lines at most */
+.ck-now {
+  margin-top: 3px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--ck-tx);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.ck-now.k-you { color: color-mix(in srgb, var(--ck-you) 88%, var(--ck-tx)) }
+.ck-now.k-err { color: color-mix(in srgb, var(--ck-err) 85%, var(--ck-tx)) }
+.ck-now.k-idle { color: var(--ck-dim) }
+.ck-now.k-next { color: color-mix(in srgb, var(--ok) 80%, var(--ck-tx)) }
+.ck-now.said::before { content: '“'; opacity: 0.6 }
+.ck-now.said::after { content: '”'; opacity: 0.6 }
+.ck-node.pile .ck-now { color: var(--ck-faint) }
+
+.ck-facts { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 5px; font-size: 11px; color: var(--ck-dim); font-variant-numeric: tabular-nums }
+.ck-f { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap }
+.ck-f::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: currentColor; opacity: 0.55 }
+.ck-f.late { color: var(--ck-err) }
+.ck-f.dirty { color: var(--ck-you) }
+.ck-f.cost { margin-left: auto }
+.ck-f.cost::before { display: none }
+
+/* ------------------------------------------------------------------ the queue under it */
+.ck-q {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0 0 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex: 1;
+  min-height: 24px;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+.ck-i {
+  position: relative;
+  padding: 7px 9px 7px 11px;
+  border-radius: 8px;
+  border: 1px solid var(--ck-line);
+  background: color-mix(in srgb, var(--n6) 60%, transparent);
+  transition: border-color 140ms, opacity 140ms, background 140ms;
+}
+.ck-i.can { cursor: grab }
+.ck-i.can:active { cursor: grabbing }
+.ck-i:hover { border-color: var(--n20, var(--ck-line)) }
+.ck-i-t { font-size: 12.5px; line-height: 1.35; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden }
+.ck-i-m { font-size: 11px; color: var(--ck-dim); font-variant-numeric: tabular-nums }
+
+.ck-i.s-done { opacity: 0.45; background: transparent; border-color: transparent; padding-block: 3px }
+.ck-i.s-done .ck-i-t { color: var(--ck-dim); -webkit-line-clamp: 1 }
+.ck-tick { color: var(--ok); margin-right: 6px; font-size: 11px }
+.ck-more { font-size: 11px; color: var(--ck-faint); padding: 0 11px }
+.ck-empty { font-size: 11.5px; color: var(--ck-faint); padding: 8px 11px; border: 1px dashed var(--ck-line); border-radius: 8px }
+
+.ck-i.s-running {
+  border-color: color-mix(in srgb, var(--ck-run) 45%, var(--ck-line));
+  background: color-mix(in srgb, var(--ck-run) 7%, var(--n6));
+}
+.ck-i.s-running::before, .ck-i.ready::before {
+  content: '';
+  position: absolute;
+  left: -1px;
+  top: 7px;
+  bottom: 7px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--ck-run);
+}
+.ck-i.ready::before { background: var(--ok) }
+.ck-bar { height: 3px; margin: 6px 0 3px; border-radius: 3px; background: color-mix(in srgb, var(--ck-run) 16%, transparent); overflow: hidden }
+.ck-bar i {
+  display: block;
+  height: 100%;
+  background: var(--ck-run);
+  border-radius: inherit;
+  transform-origin: left;
+  transform: scaleX(var(--p));
+  /* the rest of the estimate, drawn by the compositor: no timer, no layout */
+  animation: ck-fill var(--left) linear forwards;
+}
+@keyframes ck-fill { to { transform: scaleX(0.98) } }
+.ck-bar.open i { width: 30%; animation: ck-sweep 1.8s ease-in-out infinite; transform: none }
+@keyframes ck-sweep { from { transform: translateX(-100%) } to { transform: translateX(340%) } }
+
+.ck-i.s-blocked:not(.proposed) { border-style: dashed }
+.ck-i.s-blocked:not(.proposed) .ck-i-t { color: var(--ck-dim) }
+.ck-i.proposed { border-style: dashed; background: transparent }
+.ck-i.proposed .ck-i-t { color: var(--ck-dim) }
+.ck-i.needs { border-color: var(--err-bd, color-mix(in srgb, var(--err) 45%, transparent)) }
+
+.ck-i-tags { display: flex; flex-wrap: wrap; gap: 4px 6px; margin-top: 4px; align-items: center }
+.ck-tag { font-size: 10.5px; padding: 0 6px; border-radius: 999px; border: 1px solid var(--ck-line); color: var(--ck-dim); line-height: 16px }
+.ck-tag.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 35%, transparent) }
+.ck-tag.bad { color: var(--err); border-color: color-mix(in srgb, var(--err) 40%, transparent) }
+.ck-tag.prop { color: var(--ck-you); border-color: color-mix(in srgb, var(--ck-you) 40%, transparent) }
+.ck-tag.dim { border-color: transparent; padding: 0 }
+.ck-dep {
+  font-size: 11px;
+  color: var(--ck-you);
+  cursor: pointer;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-decoration: none;
+  border-bottom: 1px dotted color-mix(in srgb, var(--ck-you) 50%, transparent);
+}
+.ck-dep:hover { color: var(--lead-hi, var(--ck-you)) }
+.ck-i-err { margin-top: 4px; font-size: 11px; color: var(--err) }
+
+.ck-i-a {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  display: flex;
+  gap: 3px;
+  padding-left: 14px;
+  /* over the title's end, never under it */
+  background: linear-gradient(90deg, transparent, var(--n6) 14px);
+  border-radius: 0 6px 6px 0;
+  opacity: 0;
+  transition: opacity 120ms;
+}
+.ck-i.proposed .ck-i-a { background: none; padding-left: 0 }
+.ck-i:hover .ck-i-a, .ck-i:focus-within .ck-i-a, .ck-i.proposed .ck-i-a { opacity: 1 }
+.ck-i.proposed .ck-i-a { position: static; margin-top: 6px }
+.ck button[data-a] {
+  font: 500 11px system-ui, sans-serif;
+  padding: 2px 7px;
+  border-radius: 6px;
+  border: 1px solid var(--ck-line);
+  background: var(--n4, var(--ck-bg));
+  color: var(--ck-dim);
+  cursor: pointer;
+}
+.ck button[data-a]:hover { color: var(--ck-tx); border-color: var(--ck-dim) }
+:is(#ss, body) .ck button[data-a='accept'] { color: color-mix(in srgb, var(--warn) 15%, black); background: var(--ck-you); border-color: var(--ck-you); font-weight: 600 }
+
+.ck-i.dragging { opacity: 0.3 }
+.ck-mark { height: 2px; margin: -2px 4px; border-radius: 2px; background: var(--info); box-shadow: 0 0 8px var(--info) }
+.ck-i.flash { animation: ck-flash 1.1s ease-out }
+@keyframes ck-flash {
+  0%, 30% { border-color: var(--ck-you); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ck-you) 30%, transparent) }
+}
+
+.ck-add {
+  margin-top: 6px;
+  width: 100%;
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ck-tx);
+  transition: border-color 140ms, background 140ms;
+}
+.ck-add::placeholder { color: var(--ck-faint) }
+.ck-lane:hover .ck-add { border-color: var(--ck-line) }
+.ck-add:focus { outline: none; border-color: color-mix(in srgb, var(--info) 60%, transparent); background: var(--ck-bg) }
+
+.ck-err {
+  margin: 0 12px 10px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  background: var(--err-bg, color-mix(in srgb, var(--err) 12%, transparent));
+  color: var(--err-lt, var(--err));
+  border: 1px solid var(--err-bd, color-mix(in srgb, var(--err) 35%, transparent));
+}
+
+.ck-tip {
+  position: absolute;
+  z-index: 5;
+  max-width: 320px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--ck-line);
+  background: var(--n4, var(--ck-bg));
+  color: var(--ck-tx);
+  font-size: 12px;
+  line-height: 1.45;
+  box-shadow: 0 8px 28px rgb(0 0 0 / 0.45);
+  pointer-events: none;
+}
+
+/* ------------------------------------------------------------------ @ routing (cockpit-route.ts) */
+.ck-at[hidden], .ck-tip[hidden] { display: none }
+.ck-at {
+  position: fixed;
+  /* above the dock and a floating panel: it belongs to the composer you are typing in */
+  z-index: 10000;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  border-radius: 10px;
+  border: 1px solid var(--n16);
+  background: var(--n4, var(--n2));
+  box-shadow: 0 12px 36px rgb(0 0 0 / 0.5);
+  font: 400 12.5px/1.35 system-ui, -apple-system, sans-serif;
+  color: var(--n35);
+}
+.ck-at-i {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 9px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ck-at-i.on { background: color-mix(in srgb, var(--info) 16%, transparent) }
+.ck-at-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--n24) }
+.ck-at-dot.st-running, .ck-at-dot.st-starting { background: var(--cyan, var(--info)) }
+.ck-at-dot.st-waiting { background: var(--warn) }
+.ck-at-dot.st-error { background: var(--err) }
+.ck-at-t { display: flex; align-items: baseline; gap: 8px; min-width: 0; flex: 1 }
+.ck-at-t b { font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.ck-at-t em { font-style: normal; color: var(--n27); font-size: 11.5px; white-space: nowrap }
+.ck-at-h { font: 11.5px ui-monospace, Menlo, monospace; color: var(--n27) }
+.ck-at-none, .ck-at-shut { margin: 0; padding: 6px 9px; color: var(--n27); font-size: 12px }
+.ck-at-shut { color: var(--warn) }
+
+.ck-flag {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 12px 6px;
+  padding: 7px 10px;
+  border-radius: 9px;
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  color: var(--n35);
+  font: 400 12.5px/1.35 system-ui, -apple-system, sans-serif;
+}
+.ck-flag span { flex: 1; min-width: 0 }
+.ck-flag button {
+  font: 500 12px system-ui, sans-serif;
+  padding: 3px 9px;
+  border-radius: 7px;
+  border: 1px solid var(--n16);
+  background: var(--n4, var(--n2));
+  color: var(--n35);
+  cursor: pointer;
+}
+:is(#ss, body) .ck-flag button[data-f='pile'] { background: var(--warn); border-color: var(--warn); color: color-mix(in srgb, var(--warn) 15%, black); font-weight: 600 }

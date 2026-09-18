@@ -1,0 +1,56 @@
+/* Offloaded compute in the top bar (offload.ts). Sits right of the CPU and memory meter. */
+.ol { display: flex; align-items: center; gap: 6px; flex: none; margin-right: 2px; padding: 0 9px; height: 30px; border: 1px solid var(--n13); border-radius: 8px; cursor: default }
+.ol[hidden] { display: none }
+.ol em { font: 500 9.5px/1 ui-sans-serif, -apple-system, system-ui, sans-serif; font-style: normal; letter-spacing: 0.04em; text-transform: uppercase; color: var(--n24) }
+.ol-bars { display: grid; gap: 3px }
+.ol-m { display: block; width: 30px; height: 4px; border-radius: 4px; background: color-mix(in srgb, var(--acc) 16%, transparent); overflow: hidden }
+.ol-m i { display: block; height: 100%; background: var(--acc); transform-origin: left; transition: transform 0.4s ease }
+.ol-m[data-level='warm'] i { background: var(--warn) }
+.ol-m[data-level='hot'] i { background: var(--err) }
+.ol-m.off { background: var(--n13) }
+.ol-m.off i { background: transparent }
+.ol small { min-width: 12px; font: 600 10.5px/1 ui-monospace, Menlo, monospace; text-align: right; color: var(--n24); font-variant-numeric: tabular-nums }
+.ol small.on { color: var(--acc) }
+.ol:hover, .ol:focus-visible { border-color: var(--n18); outline: none }
+@media (prefers-reduced-motion: reduce) { .ol-m i { transition: none } }
+
+/* the hover card */
+.ol-card { position: fixed; z-index: 1000; width: 340px; max-width: calc(100vw - 16px); padding: 10px 14px 12px; border: 1px solid var(--n18); border-radius: 10px; background: var(--n7); color: var(--n30); font: 12px/1.35 ui-sans-serif, -apple-system, system-ui, sans-serif; box-shadow: 0 12px 32px hsla(var(--shadow), 0.35); animation: ol-in 0.12s ease }
+.ol-card[hidden] { display: none }
+@keyframes ol-in { from { opacity: 0; transform: translateY(-3px) } }
+.ol-head { display: flex; justify-content: space-between; gap: 8px; color: var(--n34) }
+.ol-head b { font: 600 12px/1.35 ui-monospace, Menlo, monospace; color: var(--n37) }
+.ol-sum { margin-top: 2px; font-size: 11px; color: var(--n24) }
+.ol-sum em { font-style: normal; color: var(--err) }
+.ol-n { margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--n13) }
+.ol-nh { display: flex; align-items: baseline; gap: 6px; min-width: 0 }
+.ol-nh b { color: var(--n37); font-weight: 600 }
+.ol-dot { width: 7px; height: 7px; flex: none; align-self: center; border-radius: 50%; background: var(--ok) }
+.ol-n.off .ol-dot { background: var(--n18) }
+.ol-addr { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 10.5px/1.35 ui-monospace, Menlo, monospace; color: var(--n24) }
+.ol-stats { display: flex; flex-wrap: wrap; gap: 2px 12px; margin-top: 6px; font-size: 11px; color: var(--n24) }
+.ol-stats b { font: 600 11px/1.35 ui-monospace, Menlo, monospace; color: var(--n34); font-variant-numeric: tabular-nums }
+.ol-stats .warm b { color: var(--warn) }
+.ol-stats .hot b { color: var(--err) }
+.ol-caps { margin-top: 2px; font-size: 11px; color: var(--n24) }
+.ol-caps.err { color: var(--err) }
+.ol-os { font-size: 10px; color: var(--n24); border: 1px solid var(--n10); border-radius: 3px; padding: 0 4px }
+.ol-state { margin-left: auto; font-size: 10.5px; color: var(--err) }
+.ol-gpu { margin-top: 2px; font-size: 11px; color: var(--n30) }
+.ol-gpu.none { color: var(--n24) }
+.ol-gpu.warn { color: var(--warn) }
+.ol-gets { margin-top: 4px; font-size: 11px; color: var(--n24) }
+.ol-gets b { color: var(--acc); font-weight: 600 }
+.ol-idle { margin-top: 6px; font-size: 11px; color: var(--n24) }
+.ol-js { display: grid; gap: 1px; margin-top: 6px }
+.ol-js.past { margin-top: 4px; opacity: 0.75 }
+.ol-j { display: grid; grid-template-columns: 14px auto minmax(0, 1fr) auto; align-items: center; gap: 6px; font-size: 11px; line-height: 1.6 }
+.ol-mark { color: var(--n24); text-align: center }
+.ol-j.done .ol-mark { color: var(--ok) }
+.ol-j.failed .ol-mark { color: var(--err) }
+.ol-what { color: var(--n34); white-space: nowrap }
+.ol-on { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--n24) }
+.ol-j b { font: 600 10.5px/1.6 ui-monospace, Menlo, monospace; color: var(--n30); font-variant-numeric: tabular-nums }
+.ol-spin { display: inline-block; width: 8px; height: 8px; border: 1.5px solid color-mix(in srgb, var(--acc) 30%, transparent); border-top-color: var(--acc); border-radius: 50%; animation: ol-spin 0.9s linear infinite }
+@keyframes ol-spin { to { transform: rotate(360deg) } }
+@media (prefers-reduced-motion: reduce) { .ol-spin { animation: none } }

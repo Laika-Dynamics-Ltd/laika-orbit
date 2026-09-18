@@ -5,7 +5,7 @@
   "license": "MIT",
   "author": "Laika Dynamics Limited",
   "type": "module",
-  "description": "Chromium shell for laika-1brain: the dashboard as a desktop window, with a multi-profile browser inside it",
+  "description": "Chromium shell for Laika Orbit: the dashboard as a desktop window, with a multi-profile browser inside it",
   "main": "main.mjs",
   "scripts": {
     "start": "electron ."

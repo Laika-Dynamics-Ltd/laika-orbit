@@ -1,0 +1,84 @@
+/* /pulse — the adoption node network. Dark by default whatever the theme: it is a starfield. */
+.pu-page {
+  margin: 0;
+  background: #05070d;
+  color: #cfe3f5;
+  font: 13px/1.45 ui-sans-serif, system-ui, -apple-system, "SF Pro Text", sans-serif;
+  overflow: hidden;
+}
+.pu { position: fixed; inset: 0; }
+.pu canvas { display: block; }
+
+/* --- the rails ------------------------------------------------------------------ */
+.pu-hud {
+  position: absolute; top: 18px; left: 18px; z-index: 3;
+  display: flex; flex-direction: column; gap: 14px;
+  max-width: 264px; pointer-events: none;
+}
+.pu-hud > * { pointer-events: auto; }
+.pu-title { font-size: 11px; letter-spacing: .16em; text-transform: uppercase; color: #7f9bb5; }
+.pu-title b { display: block; font-size: 19px; letter-spacing: 0; text-transform: none; color: #eaf4ff; font-weight: 600; margin-top: 2px; }
+
+.pu-card {
+  background: rgba(10, 16, 28, .72); border: 1px solid rgba(86, 216, 255, .14);
+  border-radius: 10px; padding: 11px 13px; backdrop-filter: blur(9px);
+}
+.pu-card h3 { margin: 0 0 8px; font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: #6f8ba4; font-weight: 600; }
+
+/* the funnel: one row per stage, the bar showing its share of the widest stage */
+.pu-stage { display: grid; grid-template-columns: 58px 1fr auto; align-items: center; gap: 8px; margin-bottom: 6px; }
+.pu-stage:last-child { margin-bottom: 0; }
+.pu-stage i { font-style: normal; font-size: 11px; color: #8fa9c0; }
+.pu-stage .bar { height: 5px; border-radius: 3px; background: rgba(255, 255, 255, .07); overflow: hidden; }
+.pu-stage .bar span { display: block; height: 100%; border-radius: 3px; transition: width .5s ease; }
+.pu-stage b { font-variant-numeric: tabular-nums; font-size: 13px; color: #eaf4ff; min-width: 34px; text-align: right; }
+
+.pu-feat { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; padding: 2px 0; }
+.pu-feat span { color: #9db6cb; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pu-feat b { font-variant-numeric: tabular-nums; color: #ffb488; font-weight: 500; }
+.pu-empty { color: #64809a; font-size: 12px; line-height: 1.5; }
+
+/* --- source + consent state ------------------------------------------------------ */
+.pu-src { display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: #8fa9c0; padding: 3px 0; }
+.pu-src .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: #3d5570; }
+.pu-src .dot.on { background: #56d8ff; box-shadow: 0 0 7px #56d8ff; }
+.pu-src .dot.off { background: #3d5570; }
+.pu-src .dot.warn { background: #ffb44c; box-shadow: 0 0 7px #ffb44c; }
+.pu-src em { font-style: normal; color: #5f7b95; }
+
+.pu-note {
+  font-size: 11px; line-height: 1.5; color: #6e8aa4;
+  border-left: 2px solid rgba(86, 216, 255, .22); padding-left: 9px;
+}
+
+/* --- tooltip --------------------------------------------------------------------- */
+.pu-tip {
+  position: absolute; z-index: 4; pointer-events: none; opacity: 0;
+  transform: translate(-50%, calc(-100% - 13px)); transition: opacity .12s;
+  background: rgba(8, 14, 24, .95); border: 1px solid rgba(86, 216, 255, .3);
+  border-radius: 8px; padding: 7px 10px; white-space: nowrap; font-size: 12px;
+}
+.pu-tip.on { opacity: 1; }
+.pu-tip b { color: #eaf4ff; }
+.pu-tip i { font-style: normal; display: block; margin-top: 2px; font-size: 11px; color: #7f9bb5; }
+.pu-tip .cohort { color: #ffb44c; }
+
+/* --- the time axis along the bottom ---------------------------------------------- */
+.pu-axis {
+  position: absolute; left: 0; right: 0; bottom: 14px; z-index: 2;
+  display: flex; justify-content: center; gap: 2px; pointer-events: none; padding: 0 18px;
+}
+.pu-axis i {
+  font-style: normal; font-size: 9.5px; color: #55708a; width: 30px; text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.pu-axis i.now { color: #ffb488; }
+
+.pu-help {
+  position: absolute; right: 18px; bottom: 16px; z-index: 3;
+  font-size: 11px; color: #56718c; text-align: right; line-height: 1.6;
+}
+.pu-help kbd {
+  font: inherit; background: rgba(255,255,255,.07); border-radius: 3px; padding: 1px 4px; color: #90aac0;
+}
+@media (prefers-reduced-motion: reduce) { .pu-stage .bar span { transition: none; } }

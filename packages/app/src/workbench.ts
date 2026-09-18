@@ -1,11 +1,19 @@
 /**
- * The workbench: a slim nav rail down the left edge that arranges the page for daily work.
- * The browser (or, without the desktop shell, the knowledge ring) fills the left, Claude docks
- * on the right, and the rail brings the ring, the browser, Claude and the widget column in and
- * out. Below a rule sit the views that open over all of it: agent control (what needs you),
- * History (what happened), Mission Control (the build panel) and Showreel. Everything it toggles already exists; this only drives it
- * and remembers the choice.
+ * The workbench: a slim nav rail down the left edge, and the one place a feature is reached from.
+ *
+ * The rail is in runs, with a rule between them. First the three that arrange the page — the
+ * browser (or, without the desktop shell, the knowledge ring), the ring, and Claude on the right.
+ * Then three slots the panel system fills with its own buttons (panels.ts, `group` on a spec):
+ * `fleet` for the agents, `know` for what is written down, `make` for the things you build with.
+ * The two full-window views that are not panels — Mission Control and Showreel Studio — sit in
+ * `make` beside them, and the floating player and the widget column keep the foot of the rail.
+ *
+ * This file no longer knows what a panel is. Agent control, autopilot, History, the databases,
+ * the fleet board, Runs and the profiler all register themselves with the panel system and their
+ * buttons arrive in the slots below; what is left here is the handful of views that arrange the
+ * page or cover it, which the panel system deliberately does not own.
  */
+import './devfeatures.ts'
 import './workbench.css'
 
 type Panel = { open(): void; close(): void; isOpen(): boolean }
@@ -15,12 +23,12 @@ type Host = {
   rail: { hidden(i: number): boolean; set(i: number, hidden: boolean): void }
   /** Showreel Studio; announces itself with `laika:showreel-open` */
   showreel: Panel
-  /** agent control; announces itself with `laika:control-open` */
-  control: Panel
-  /** History; toggles body.hist-open, which the observer below already watches */
-  history: Panel
   /** Mission Control, the build panel; announces itself with `laika:mission-open` */
   mission: Panel
+  /** the Brain window: what is indexed, the rules, the ranking */
+  brain: { open(): void }
+  /** the floating YouTube player; it floats over the page rather than arranging it */
+  music: Panel
 }
 
 const SETUP_KEY = 'laika.workbench'
@@ -50,13 +58,29 @@ const ICONS = {
   history: svg(
     '<path d="M3.4 10a6.6 6.6 0 1 0 1.9-4.7"/><path d="M3 2.9v3.2h3.2"/><path d="M10 6.2V10l2.6 1.7"/>',
   ),
+  autopilot: svg(
+    '<circle cx="10" cy="10" r="7.2"/><path d="M10 5.4V10l3 1.9"/><path d="M2.8 10h1.6M15.6 10h1.6M10 2.8v1.6"/>',
+  ),
+  db: svg(
+    '<ellipse cx="10" cy="5" rx="6.4" ry="2.6"/><path d="M3.6 5v10c0 1.44 2.87 2.6 6.4 2.6s6.4-1.16 6.4-2.6V5"/><path d="M3.6 10c0 1.44 2.87 2.6 6.4 2.6s6.4-1.16 6.4-2.6"/>',
+  ),
+  music: svg(
+    '<path d="M7.6 14.2V5.2l8-1.7v9M7.6 8.2l8-1.7"/><ellipse cx="5.2" cy="14.4" rx="2.4" ry="2"/><ellipse cx="13.2" cy="12.6" rx="2.4" ry="2"/>',
+  ),
+  brain: svg(
+    '<path d="M8.2 3a2.4 2.4 0 0 0-2.4 2.4 2.2 2.2 0 0 0-1.6 3.5 2.3 2.3 0 0 0 .5 3.5A2.3 2.3 0 0 0 8.2 17V3Z"/><path d="M11.8 3a2.4 2.4 0 0 1 2.4 2.4 2.2 2.2 0 0 1 1.6 3.5 2.3 2.3 0 0 1-.5 3.5A2.3 2.3 0 0 1 11.8 17V3Z"/>',
+  ),
   widgets: svg(
     '<rect x="3" y="3" width="6" height="6" rx="1.5"/><rect x="11" y="3" width="6" height="6" rx="1.5"/><rect x="3" y="11" width="6" height="6" rx="1.5"/><rect x="11" y="11" width="6" height="6" rx="1.5"/>',
   ),
 }
 
-/** The rail choices that open over the page rather than rearranging it. */
-const VIEWS = ['showreel', 'control', 'history', 'mission'] as const
+/**
+ * The rail choices that cover the page rather than rearranging it or docking beside it. They
+ * still close each other, because two full-window views at once means changing something you
+ * cannot see. Panels do not need that rule: they take space instead of covering it.
+ */
+const VIEWS = ['showreel', 'mission'] as const
 type View = (typeof VIEWS)[number]
 const isView = (k: string): k is View => (VIEWS as readonly string[]).includes(k)
 
@@ -66,15 +90,22 @@ export function createWorkbench(host: Host) {
   nav.setAttribute('aria-label', 'Workbench')
   nav.innerHTML = `
     <button type="button" data-nav="browser" title="Browser (b)" aria-label="Browser">${ICONS.browser}<span>Web</span></button>
-    <button type="button" data-nav="ring" title="Knowledge ring" aria-label="Knowledge ring">${ICONS.ring}<span>Ring</span></button>
+    <button type="button" data-nav="ring" title="Knowledge ring (k)" aria-label="Knowledge ring">${ICONS.ring}<span>Ring</span></button>
     <button type="button" data-nav="claude" title="Claude (s)" aria-label="Claude">${ICONS.claude}<span>Claude</span></button>
     <i class="wbn-sep"></i>
-    <button type="button" data-nav="control" title="Agent control: what needs you (c)" aria-label="Agent control">${ICONS.control}<span>Agents</span><b class="wbn-badge" hidden></b></button>
-    <button type="button" data-nav="history" title="History: what happened (h)" aria-label="History">${ICONS.history}<span>History</span></button>
-    <button type="button" data-nav="mission" title="Mission Control: builds, lanes, verdicts" aria-label="Mission Control">${ICONS.mission}<span>Mission</span><b class="wbn-badge" hidden></b></button>
-    <button type="button" data-nav="showreel" title="Showreel Studio" aria-label="Showreel Studio">${ICONS.showreel}<span>Reel</span></button>
+    <i class="wbn-slot" data-group="fleet"></i>
+    <i class="wbn-sep"></i>
+    <button type="button" data-nav="brain" title="Brain: what is indexed, the rules, the ranking (i)" aria-label="Brain">${ICONS.brain}<span>Brain</span></button>
+    <i class="wbn-slot" data-group="know"></i>
+    <i class="wbn-slot" data-group="make"></i>
+    <i class="wbn-sep"></i>
+    <button type="button" data-nav="music" title="Floating YouTube player (m)" aria-label="Floating YouTube player">${ICONS.music}<span>Play</span></button>
     <i class="wbn-fill"></i>
-    <button type="button" data-nav="widgets" title="Widget column ([)" aria-label="Widget column">${ICONS.widgets}<span>Widgets</span></button>`
+    <button type="button" data-nav="widgets" title="Widget column ([)" aria-label="Widget column">${ICONS.widgets}<span>Widgets</span></button>
+    <i class="wbn-sep wbn-dev-sep" data-dev aria-hidden="true"></i>
+    <button type="button" data-nav="mission" data-dev title="Mission Control: builds, lanes, verdicts (g)" aria-label="Mission Control">${ICONS.mission}<span>Mission</span><b class="wbn-badge" hidden></b></button>
+    <button type="button" data-nav="showreel" data-dev title="Showreel Studio (v)" aria-label="Showreel Studio">${ICONS.showreel}<span>Reel</span></button>
+    <i class="wbn-slot" data-group="dev" data-dev></i>`
   document.body.appendChild(nav)
   document.body.classList.add('has-wbn')
 
@@ -86,14 +117,26 @@ export function createWorkbench(host: Host) {
     set('ring', !web)
     set('claude', host.claude.isOpen())
     for (const v of VIEWS) set(v, host[v].isOpen())
+    // the panel buttons paint themselves (panels.ts); nothing here reaches into the slots
+    set('music', host.music.isOpen())
     set('widgets', !host.rail.hidden(0))
   }
 
   nav.addEventListener('click', (e) => {
     const k = (e.target as HTMLElement).closest<HTMLElement>('[data-nav]')?.dataset.nav
     if (!k) return
-    // The views cover the page (agent control, its right half), so choosing anything clears
-    // the ones it is not; otherwise the rail would change something you cannot see.
+    // the player floats over whatever is open rather than replacing it, so it closes nothing
+    if (k === 'music') {
+      host.music.isOpen() ? host.music.close() : host.music.open()
+      return paint()
+    }
+    // the Brain window is a window, not a view: it opens over whatever is there and closes itself
+    if (k === 'brain') {
+      host.brain.open()
+      return paint()
+    }
+    // The full-window views cover the page, so choosing one clears the others; otherwise the
+    // rail would change something you cannot see.
     for (const v of VIEWS) if (v !== k) host[v].close()
     if (isView(k)) host[k].isOpen() ? host[k].close() : host[k].open()
     if (k === 'browser') host.browser.open(true)
@@ -109,21 +152,16 @@ export function createWorkbench(host: Host) {
     } catch {}
     paint()
   })
-  addEventListener('laika:showreel-open', paint)
-  addEventListener('laika:control-open', paint)
-  addEventListener('laika:mission-open', paint)
-  // sessions waiting on you, counted where the agents widget refreshes
-  const badge = nav.querySelector<HTMLElement>('[data-nav="control"] .wbn-badge')
-  addEventListener('laika:waiting', (e) => {
-    const n = (e as CustomEvent<number>).detail
-    if (!badge) return
-    badge.hidden = !n
-    badge.textContent = n > 9 ? '9+' : String(n)
-    badge.parentElement?.setAttribute(
-      'aria-label',
-      n ? `Agent control, ${n} waiting on you` : 'Agent control',
-    )
+  // a panel opening under Mission or Reel would open out of sight: the full-window views step
+  // aside for it, as they do for each other
+  addEventListener('laika:panel', (e) => {
+    if (!(e as CustomEvent<{ open: boolean }>).detail.open) return
+    for (const v of VIEWS) if (host[v].isOpen()) host[v].close()
+    paint()
   })
+  addEventListener('laika:showreel-open', paint)
+  addEventListener('laika:mission-open', paint)
+  addEventListener('laika:youtube-open', paint)
   // builds waiting on your verdict in Mission Control; -1 while the panel is down
   const missionBadge = nav.querySelector<HTMLElement>('[data-nav="mission"] .wbn-badge')
   addEventListener('laika:mission-waiting', (e) => {

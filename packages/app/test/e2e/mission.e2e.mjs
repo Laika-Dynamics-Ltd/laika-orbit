@@ -45,16 +45,18 @@ describe('mission control', { skip: !up && 'server not running on E2E_URL' }, ()
       assert.ok((await page.textContent('#mc .mc-down')).includes(s.url))
     }
 
-    // a view like the others: History clears it, and it clears agent control
-    await page.click('#wbn [data-nav="history"]')
-    await page.waitForSelector('#hist.on')
+    // it covers the page, so opening a panel clears it rather than opening out of sight; the
+    // panel stays in the dock underneath when Mission comes back over it
+    await page.click('#wbn [data-pnl="history"]')
+    await page.waitForSelector('#pnl-history .hist.on')
     assert.equal(await page.evaluate(() => document.querySelector('#mc').classList.contains('on')), false)
-    await page.click('#wbn [data-nav="control"]')
-    await page.waitForSelector('#ctl-drawer.on')
     await page.click(mission)
     await page.waitForSelector('#mc.on')
-    assert.equal(await page.evaluate(() => document.querySelector('#ctl-drawer').classList.contains('on')), false)
-    assert.deepEqual((await lit()).filter((k) => ['history', 'control', 'showreel', 'mission'].includes(k)), ['mission'])
+    assert.deepEqual((await lit()).filter((k) => ['showreel', 'mission'].includes(k)), ['mission'])
+    await page.evaluate(() => document.querySelector('#wbn [data-pnl="history"]').click()) // History out
+    await page.waitForFunction(() => document.getElementById('pnl-history').hidden)
+    // closing a panel leaves Mission as it was
+    assert.equal(await page.evaluate(() => document.querySelector('#mc').classList.contains('on')), true)
 
     // reopening keeps the same frame, so the panel's own place survives
     await page.click(mission)
@@ -63,7 +65,7 @@ describe('mission control', { skip: !up && 'server not running on E2E_URL' }, ()
     await page.waitForSelector('#mc.on')
     assert.ok((await page.locator('#mc iframe').count()) <= 1)
 
-    // esc from 1brain's side closes it
+    // esc from Laika Orbit's side closes it
     await page.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur())
     await page.keyboard.press('Escape')
     await page.waitForFunction(() => !document.querySelector('#mc').classList.contains('on'))
@@ -102,10 +104,10 @@ describe('the Build view', { skip: !up && 'server not running on E2E_URL' }, () 
     })
     assert.equal(start.status, 403, 'a write without the control header is refused')
     const repos = await (await fetch(`${BASE}/api/control/repos`)).json()
-    const own = repos.find((x) => x.path.endsWith('/laika-1brain') || x.path.includes('/laika-1brain-'))
+    const own = repos.find((x) => x.path.endsWith('/laika-orbit') || x.path.includes('/laika-orbit-'))
     if (own) {
       const p = await (await fetch(`${BASE}/api/mission/panel?root=${encodeURIComponent(own.path)}`)).json()
-      assert.equal(p.configured, false, '1brain has no panel of its own')
+      assert.equal(p.configured, false, 'Laika Orbit has no panel of its own')
     }
   })
 

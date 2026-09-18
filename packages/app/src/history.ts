@@ -9,6 +9,7 @@
  */
 import './history.css'
 import { type HistoryMap, type MapData, type Moment, makeHistoryMap } from './history-map.ts'
+import { registerPanel } from './panels.ts'
 import { onTheme } from './themes.ts'
 
 type HistMoment = Omit<Moment, 'session' | 'commits'> & {
@@ -39,6 +40,10 @@ type Payload = Omit<MapData, 'moments'> & {
     totalProjects: number
   }
 }
+
+/** the rail's clock-with-an-arrow, the same glyph the workbench rail used for History */
+const ICON =
+  '<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3.4 10a6.6 6.6 0 1 0 1.9-4.7"/><path d="M3 2.9v3.2h3.2"/><path d="M10 6.2V10l2.6 1.7"/></svg>'
 
 export type HistoryView = {
   open(): void
@@ -76,11 +81,16 @@ const STATE_LABEL: Record<string, string> = {
   idle: 'finished',
 }
 
-export function createHistory(opts: { openControlAt: (id: string) => void }): HistoryView {
+export function createHistory(opts: {
+  openControlAt: (id: string) => void
+  /** the panel body it lives in; History stopped positioning itself when panels.ts landed */
+  host?: HTMLElement
+}): HistoryView {
+  const hosted = !!opts.host
   const root = document.createElement('div')
-  root.id = 'hist'
+  if (!hosted) root.id = 'hist'
   root.className = 'hist'
-  root.setAttribute('role', 'dialog')
+  root.setAttribute('role', hosted ? 'group' : 'dialog')
   root.setAttribute('aria-label', 'History')
   root.innerHTML = `
     <header class="h-top">
@@ -90,7 +100,7 @@ export function createHistory(opts: { openControlAt: (id: string) => void }): Hi
       </div>
       <div class="h-right">
         <button type="button" class="h-btn ghost" data-act="fit" title="Fit everything in view (f)">Fit</button>
-        <button type="button" class="h-btn ghost h-close" data-act="close" title="Close (esc)" aria-label="Close">×</button>
+        ${hosted ? '' : '<button type="button" class="h-btn ghost h-close" data-act="close" title="Close (esc)" aria-label="Close">×</button>'}
       </div>
     </header>
     <div class="h-bar">
@@ -108,12 +118,12 @@ export function createHistory(opts: { openControlAt: (id: string) => void }): Hi
       </div>
       <aside class="h-detail" data-el="detail" hidden></aside>
     </div>`
-  document.body.appendChild(root)
+  ;(opts.host ?? document.body).appendChild(root)
   const $ = <T extends HTMLElement = HTMLElement>(k: string) =>
     root.querySelector(`[data-el="${k}"]`) as T
 
   let tl: HistoryMap | null = null
-  let hours: number = Number(localStorage.getItem('1brain:hist-hours')) || 24
+  let hours: number = Number(localStorage.getItem('orbit:hist-hours')) || 24
   if (!HOURS.includes(hours as (typeof HOURS)[number])) hours = 24
   let project: string | null = null
   let data: Payload | null = null
@@ -258,7 +268,7 @@ export function createHistory(opts: { openControlAt: (id: string) => void }): Hi
     const hb = t.closest<HTMLElement>('[data-hours]')
     if (hb) {
       hours = Number(hb.dataset.hours)
-      localStorage.setItem('1brain:hist-hours', String(hours))
+      localStorage.setItem('orbit:hist-hours', String(hours))
       showDetail(null)
       data = null
       return load(true)
@@ -334,7 +344,7 @@ export function createHistory(opts: { openControlAt: (id: string) => void }): Hi
     open() {
       if (view.isOpen()) return
       root.classList.add('on')
-      document.body.classList.add('hist-open')
+      if (!hosted) document.body.classList.add('hist-open')
       stage().resize()
       load(!data)
       timer = setInterval(() => load(false), REFRESH)
@@ -342,7 +352,7 @@ export function createHistory(opts: { openControlAt: (id: string) => void }): Hi
     close() {
       if (!view.isOpen()) return
       root.classList.remove('on')
-      document.body.classList.remove('hist-open')
+      if (!hosted) document.body.classList.remove('hist-open')
       if (timer) clearInterval(timer)
       timer = null
     },
@@ -354,30 +364,62 @@ export function createHistory(opts: { openControlAt: (id: string) => void }): Hi
     fit: () => tl?.fit(),
   }
 
-  /** Keys while History is open: esc steps back out of a picked card first, then closes. */
+  /**
+   * Keys while History is open. In a panel it is not modal — the panel frame already keeps its
+   * keys to itself — so only the two that mean something here are claimed: Escape steps back out
+   * of a picked card, `f` fits. Free-standing it stays modal, as it was.
+   */
   addEventListener(
     'keydown',
-    (e) => {
-      if (!view.isOpen() || e.metaKey || e.ctrlKey || e.altKey) return
-      if ((e.target as HTMLElement).closest?.('input, textarea, select')) return
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        e.stopImmediatePropagation()
+    (ev) => {
+      if (!view.isOpen() || ev.metaKey || ev.ctrlKey || ev.altKey) return
+      if ((ev.target as HTMLElement).closest?.('input, textarea, select')) return
+      // in a panel, History only claims keys while the pointer's work is in it: focus inside it,
+      // or a card picked on its clock (a canvas click does not move focus)
+      const inside = !hosted || root.contains(ev.target as Node)
+      if (ev.key === 'Escape') {
+        if (hosted && !picked) return // nothing to step back from: the panel's own Escape closes it
+        ev.preventDefault()
+        ev.stopImmediatePropagation()
         if (picked) showDetail(null)
         else view.close()
-      } else if (e.key === 'h') {
-        e.stopImmediatePropagation()
-        view.close()
-      } else if (e.key === 'f') {
-        e.stopImmediatePropagation()
+      } else if (ev.key === 'f' && inside) {
+        ev.stopImmediatePropagation()
         tl?.fit()
-      } else {
-        // History is modal: nothing typed here should fly the map underneath or open another view
-        e.stopImmediatePropagation()
+      } else if (!hosted) {
+        if (ev.key === 'h') view.close()
+        // free-standing, History is modal: nothing typed here flies the map underneath
+        ev.stopImmediatePropagation()
       }
     },
     { capture: true },
   )
 
   return view
+}
+
+// ------------------------------------------------------------------- as a panel ----
+
+/**
+ * History in the dock: `h`, the rail's History button, or "History" in the palette — all three
+ * the same panel. It is wide, because the clock needs room to be read at all.
+ */
+export function registerHistoryPanel(opts: { openControlAt: (id: string) => void }) {
+  let view: HistoryView | null = null
+  return registerPanel({
+    id: 'history',
+    title: 'History',
+    group: 'know',
+    key: 'h',
+    icon: ICON,
+    wide: true,
+    width: { min: 520, default: 980, snaps: [680, 980, 1320] },
+    terms: 'timeline what happened today commits memory notes activity chaos log moments clock',
+    hint: 'what happened, across every agent and repo',
+    mount: (host) => {
+      view = createHistory({ ...opts, host })
+      return () => view?.close()
+    },
+    onVisible: (on) => (on ? view?.open() : view?.close()),
+  })
 }

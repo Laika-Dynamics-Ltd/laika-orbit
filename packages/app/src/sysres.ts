@@ -1,4 +1,5 @@
 import './sysres.css'
+import * as activity from './activity.ts'
 
 /**
  * CPU and memory in the top bar. Kept deliberately cheap: one small request every few seconds
@@ -246,8 +247,13 @@ async function tick() {
       busy = false
     }
   }
-  if (!document.hidden) timer = window.setTimeout(tick, EVERY_MS)
+  // a quarter as often while another app is in front
+  if (!document.hidden)
+    timer = window.setTimeout(tick, activity.atLeast('away') ? EVERY_MS * 4 : EVERY_MS)
 }
 
 addEventListener('visibilitychange', tick)
+activity.onLevel((_, was) => {
+  if (was === 'away' && !activity.atLeast('away')) tick()
+})
 tick()

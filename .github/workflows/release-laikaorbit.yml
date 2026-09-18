@@ -1,10 +1,10 @@
-name: release 1brain
-# Publishes the `1brain` npm package when a tag like 1brain-v0.1.1 is pushed. The tag must match
-# packages/1brain/package.json's version. npm trusted publishing (OIDC) authenticates the run and
+name: release laikaorbit
+# Publishes the `laikaorbit` npm package when a tag like laikaorbit-v0.1.1 is pushed. The tag must match
+# packages/laikaorbit/package.json's version. npm trusted publishing (OIDC) authenticates the run and
 # attaches provenance, so there is no npm token in the repo's secrets.
 on:
   push:
-    tags: ['1brain-v*']
+    tags: ['laikaorbit-v*']
 
 permissions:
   contents: read
@@ -23,15 +23,15 @@ jobs:
 
       - name: tag matches the package version
         run: |
-          want="1brain-v$(node -p "require('./packages/1brain/package.json').version")"
+          want="laikaorbit-v$(node -p "require('./packages/laikaorbit/package.json').version")"
           test "$GITHUB_REF_NAME" = "$want" || { echo "tag $GITHUB_REF_NAME, package says $want"; exit 1; }
 
       - name: smoke
-        run: pnpm --filter 1brain smoke
+        run: pnpm --filter laikaorbit smoke
 
       # pnpm pack writes the manifest npm users see (no workspace: specifiers); npm publishes it
       - name: publish
-        working-directory: packages/1brain
+        working-directory: packages/laikaorbit
         run: |
           pnpm pack
-          npm publish ./1brain-*.tgz --provenance --access public
+          npm publish ./laikaorbit-*.tgz --provenance --access public

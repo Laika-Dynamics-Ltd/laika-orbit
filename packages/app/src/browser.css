@@ -460,7 +460,7 @@ i.wb-fav { border: 1.5px solid var(--pc); opacity: .6; border-radius: 50% }
 #wb .wb-xerr { margin: 6px 10px; color: var(--err-lt); font-size: 12px }
 
 /* ------------------------------------------------------------------ the browser stands out */
-/* A step lighter than the rest of 1brain, like Chrome's dark theme against a darker desktop:
+/* A step lighter than the rest of Laika Orbit, like Chrome's dark theme against a darker desktop:
    the frame, the active tab and toolbar, and brighter text. Mixed from the theme's own ramp
    toward its text colour, so every theme lifts the same way. */
 #wb {
@@ -512,3 +512,34 @@ i.wb-fav { border: 1.5px solid var(--pc); opacity: .6; border-radius: 50% }
 #wb .wb-bmedit input:focus { border-color: var(--acc) }
 #wb .wb-bmfoot { display: flex; align-items: center; gap: 8px; margin-top: 12px }
 #wb .wb-bmfoot small { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+
+/* ------------------------------------------------------------------ split view */
+/* each pane is a frame; the shell draws the tab's page exactly over .wb-pane-in */
+#wb .wb-split { position: absolute; inset: 0; display: flex; padding: 4px; background: var(--tab-top) }
+#wb .wb-pane { position: relative; min-width: 0; padding: 2px; border-radius: 8px; background: var(--w-line) }
+#wb .wb-pane:first-child { flex: var(--r, 0.5) 1 0 }
+#wb .wb-pane:last-child { flex: calc(1 - var(--r, 0.5)) 1 0 }
+#wb .wb-pane.on { background: var(--acc) }
+#wb .wb-pane-in { position: relative; height: 100%; overflow: auto; border-radius: 6px; background: var(--n2) }
+#wb .wb-divider { flex: 0 0 10px; display: grid; place-items: center; cursor: col-resize }
+#wb .wb-divider i { width: 3px; height: 36px; border-radius: 2px; background: var(--w-dim); opacity: .45 }
+#wb .wb-divider:hover i { opacity: 1; background: var(--acc) }
+
+/* a pane with no page yet */
+#wb .wb-pick { max-width: 420px; margin: 0 auto; padding: 36px 20px }
+#wb .wb-pick h3 { margin: 0 0 12px; font-size: 14px; font-weight: 600 }
+#wb .wb-pick p { margin: 14px 0 0; color: var(--w-faint); font-size: 12px }
+#wb .wb-picklist { display: flex; flex-direction: column; gap: 2px }
+#wb .wb-picklist button { display: flex; align-items: center; gap: 9px; height: 34px; padding: 0 10px; border-radius: 8px; text-align: left }
+#wb .wb-picklist button:hover { background: color-mix(in srgb, var(--n34) 10%, transparent) }
+#wb .wb-picklist span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+#wb .wb-picklist small { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+#wb .wb-picklist .wb-fav { flex: none; width: 16px; height: 16px }
+
+/* the pair in the strip: joined, the half not in charge half-lit */
+#wb .wb-tab.split-a { border-top-right-radius: 0 }
+#wb .wb-tab.split-b { border-top-left-radius: 0; margin-left: -2px }
+#wb .wb-tab.split-b .wb-sep { opacity: 0 }
+#wb .wb-tab.split { box-shadow: inset 0 2px 0 color-mix(in srgb, var(--acc) 55%, transparent) }
+#wb .wb-tab.pair { background: color-mix(in srgb, var(--n9) 55%, transparent); color: var(--w-text) }
+#wb .wb-splitbtn.on { color: var(--acc) }

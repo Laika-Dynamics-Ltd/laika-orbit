@@ -1,5 +1,5 @@
 {
-  "name": "laika-1brain",
+  "name": "laika-orbit",
   "private": true,
   "license": "MIT",
   "author": "Laika Dynamics Limited",
@@ -18,7 +18,9 @@
     "brain": "node packages/cli/src/index.ts",
     "shell": "node packages/shell/start.mjs",
     "shell:app": "node packages/shell/make-app.mjs",
-    "shell:stable": "node packages/shell/make-stable.mjs"
+    "shell:stable": "node packages/shell/make-stable.mjs",
+    "node:bundle": "node tools/node-bundle/build.mjs",
+    "offload": "node packages/app/offload.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.13",

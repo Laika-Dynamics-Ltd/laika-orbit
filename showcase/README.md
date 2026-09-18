@@ -5,8 +5,8 @@
 | Path | What it is |
 | --- | --- |
 | `showreel.config.mjs` | the film: scenes, captions, narration script, voice |
-| `media/laika-1brain-film.mp4` | 42s 1080p narrated film |
-| `media/laika-1brain-film-web.mp4`, `.jpg`, `.vtt` | what the page embeds: web encode, poster, captions |
+| `media/laika-orbit-film.mp4` | 42s 1080p narrated film |
+| `media/laika-orbit-film-web.mp4`, `.jpg`, `.vtt` | what the page embeds: web encode, poster, captions |
 | `media/<scene>.mp4` | silent feature loops |
 | `demo/make-world.mjs`, `demo/run.mjs` | the fictional workspace everything is filmed on |
 
@@ -19,7 +19,7 @@ Built with [laika-showreel](https://github.com/joesdevlab/laika-showreel) (insta
 cd showcase
 showreel plan            # speak the script (local Kokoro voice, cached) and print the timing table
 showreel build           # rebuild the demo world, film every scene, compose, render → media/
-open media/laika-1brain-film.mp4
+open media/laika-orbit-film.mp4
 ```
 
 `showreel build` runs `demo/make-world.mjs` right before filming (session states are relative to the

@@ -1,15 +1,15 @@
-# 1brain
+# Laika Orbit recall
 
 **Zero-model recall over your files.** Ask a question, get back the exact section that answers it
 and the file it came from, in about a millisecond, without calling a model. Built for Claude Code:
 as an MCP server it replaces grep-and-read-whole-files with one call, using far fewer tokens.
 
-1brain is the engine inside [Laika Orbit](https://github.com/Laika-Dynamics-Ltd/laika-orbit).
+The retrieval engine inside [Laika Orbit](https://github.com/Laika-Dynamics-Ltd/laika-orbit), published on npm as `laikaorbit`.
 
 ## Use it with Claude Code
 
 ```bash
-claude mcp add 1brain -- npx -y 1brain mcp
+claude mcp add laikaorbit -- npx -y laikaorbit mcp
 ```
 
 Claude Code starts the server in your project folder and gets three tools: `recall` (answer a
@@ -19,10 +19,10 @@ at another folder, add `--root <dir>` after `mcp`.
 ## Use it from the terminal
 
 ```bash
-npx 1brain index                          # build the index for this folder
-npx 1brain recall "how do we roll back a deploy"
-npx 1brain lint                           # check router files for dangling pointers
-npx 1brain ask "…"                        # print the packed prompt for a model
+npx laikaorbit index                          # build the index for this folder
+npx laikaorbit recall "how do we roll back a deploy"
+npx laikaorbit lint                           # check router files for dangling pointers
+npx laikaorbit ask "…"                        # print the packed prompt for a model
 ```
 
 Every command takes `--root <dir>`; otherwise the corpus is `BRAIN_ROOT`, then the working directory.
@@ -49,7 +49,7 @@ and `.odt` are read with macOS `textutil`, and PDFs with `pdftotext` when it's i
 
 ## Requirements
 
-Node 22 or newer. Nothing leaves your machine: 1brain reads local files and makes no network calls.
+Node 22 or newer. Nothing leaves your machine: it reads local files and makes no network calls.
 
 ## Licence
 

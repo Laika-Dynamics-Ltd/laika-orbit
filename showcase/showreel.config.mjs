@@ -1,10 +1,10 @@
 /**
- * The laika-1brain showcase film. Build it with `showreel build` from this folder, or open it with
+ * The Laika Orbit showcase film. Build it with `showreel build` from this folder, or open it with
  * `showreel studio` (github.com/joesdevlab/laika-showreel). Everything is filmed on the fictional world in demo/.
  */
 export default {
-  name: 'laika-1brain-film',
-  title: 'laika-1brain — showcase film',
+  name: 'laika-orbit-film',
+  title: 'Laika Orbit — showcase film',
 
   app: {
     setup: 'node demo/make-world.mjs', // session states are relative to build time, so rebuild right before filming
@@ -17,16 +17,16 @@ export default {
     engine: 'kokoro',
     voice: 'am_echo', // young; Laika is LAY-kah (Joe's pick from a numbered audition)
     speed: 1.1,
-    pronounce: { Laika: '/lˈeɪkɐ/', '1brain': 'one brain', '⌘K': 'Command K' },
+    pronounce: { Laika: '/lˈeɪkɐ/', '⌘K': 'Command K' },
   },
 
   out: { build: '.showreel', media: 'media' },
 
   intro: {
-    brand: 'LAIKA·1BRAIN',
+    brand: 'LAIKA·ORBIT',
     headline: 'One window for *every agent*.',
     sub: 'A local mission control for developers running many AI coding sessions across many projects.',
-    narration: 'Laika 1brain. One window for every coding agent you run.',
+    narration: 'Laika Orbit. One window for every coding agent you run.',
   },
 
   scenes: [
@@ -104,9 +104,9 @@ export default {
   ],
 
   outro: {
-    brand: 'LAIKA·1BRAIN',
+    brand: 'LAIKA·ORBIT',
     headline: 'Close the heavy windows.',
     pills: ['Local', 'Private', 'Built for agent-heavy dev work'],
-    narration: 'Laika 1brain. Close the heavy windows.',
+    narration: 'Laika Orbit. Close the heavy windows.',
   },
 }

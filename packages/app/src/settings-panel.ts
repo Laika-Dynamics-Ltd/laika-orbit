@@ -7,10 +7,11 @@
  * actions confirm inline (click again) rather than with a browser dialog, and closing with
  * unsaved changes asks in the footer.
  */
+import { devFeatures, setDevFeatures } from './devfeatures.ts'
 import { glyph } from './glyphs.ts'
 import { THEMES } from './themes.ts'
 
-type Section = 'profile' | 'connections' | 'themes' | 'app' | 'privacy'
+type Section = 'profile' | 'connections' | 'themes' | 'app' | 'licence' | 'privacy'
 type Profile = {
   name: string
   preferredName: string
@@ -71,6 +72,8 @@ const ICON: Record<string, string> = {
     '<path d="M12 3.5a8.5 8.5 0 1 0 0 17c1.2 0 1.8-.8 1.8-1.7 0-1.5-1.4-1.8-1.4-3 0-.8.7-1.4 1.6-1.4h1.6a4.9 4.9 0 0 0 4.9-4.9c0-3.4-3.8-6-8.5-6z"/><circle cx="7.4" cy="10.4" r="1.2"/><circle cx="11.6" cy="7.7" r="1.2"/><circle cx="16" cy="9.6" r="1.2"/>',
   privacy:
     '<path d="M12 3 5 6v5.5c0 4.3 3 7.8 7 9.5 4-1.7 7-5.2 7-9.5V6z"/><path d="m9 12 2.2 2.2L15.5 10"/>',
+  licence:
+    '<circle cx="8.5" cy="12" r="3.5"/><path d="M12 12h9"/><path d="M17.5 12v3"/><path d="M20.5 12v2.2"/>',
 }
 const icon = (k: string, cls = 'set-gl') =>
   ICON[k]
@@ -82,6 +85,7 @@ const SECTIONS: [Section, string, string][] = [
   ['connections', 'Connections', 'Services this brain syncs, live'],
   ['themes', 'Themes', 'How the whole brain is lit'],
   ['app', 'App', 'Layout, grouping and resets'],
+  ['licence', 'Licence', 'Orbit Pro on this Mac'],
   ['privacy', 'Privacy & data', 'Where everything is kept'],
 ]
 
@@ -184,6 +188,29 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
   const body = (await r.json().catch(() => ({}))) as T & { error?: string }
   if (!r.ok) throw new Error(body.error ?? `${r.status} ${r.statusText}`)
   return body
+}
+
+type Licence = {
+  pro: boolean
+  state: 'none' | 'invalid' | 'active' | 'grace' | 'stale' | 'inactive'
+  detail: string
+  key: string | null
+  configured: boolean
+  renewsAt?: number | null
+  cancelAtPeriodEnd?: boolean
+  checkedAt?: number | null
+}
+let licence: Licence | null = null
+let licenceBusy = ''
+// kept here because the panel re-renders while it is being typed in
+let licenceInput = ''
+
+async function loadLicence(force = false) {
+  try {
+    licence = await api<Licence>(`/api/license${force ? '?force=1' : ''}`)
+  } catch {
+    licence = null
+  }
 }
 
 async function load() {
@@ -526,6 +553,11 @@ function appSection(): string {
       ])}</div>
     </div>
     <div class="set-group">
+      <div class="set-gh">Developer</div>
+      <div class="set-f"><span>Developer features<em>Mission Control, Showreel Studio and the Profiler: their own section at the bottom of the rail, their palette entries and their keys</em></span>
+        <div class="set-row"><label class="set-toggle${devFeatures() ? ' on' : ''}"><input type="checkbox" data-act="dev"${devFeatures() ? ' checked' : ''}><i></i>${devFeatures() ? 'On' : 'Off'}</label></div></div>
+    </div>
+    <div class="set-group">
       <div class="set-gh">Workspace</div>
       <div class="set-f"><span>Side columns<em>also <kbd>[</kbd> <kbd>]</kbd> · <kbd>\\</kbd> for graph only</em></span>
         <div class="set-row">${toggle(0, 'Left')}${toggle(1, 'Right')}</div></div>
@@ -533,6 +565,39 @@ function appSection(): string {
       <div class="set-f"><span>Widgets<em>order, columns, heights, collapsed and hidden widgets</em></span>
         <div class="set-row">${confirmBtn('reset-layout', 'Reset all widgets', 'Click again to reset')}</div></div>
     </div>`
+}
+
+// ---------------------------------------------------------------- licence ----
+function licenceSection(): string {
+  const l = licence
+  if (!l) return '<div class="set-skel"><i></i><i></i></div>'
+  if (!l.configured) {
+    return `<div class="set-callout">${icon('privacy', 'set-gl lg')}
+      <div><b>This build cannot check licences yet</b><span>Orbit Pro is not on sale. The app is free and
+        open source, and everything in it works without a licence.</span></div></div>`
+  }
+  const tone = l.pro ? (l.state === 'grace' ? 'warn' : 'live') : l.state === 'none' ? 'off' : 'err'
+  const label = l.pro ? 'Pro' : l.state === 'none' ? 'Free' : 'Pro off'
+  const when = (ms?: number | null) => (ms ? new Date(ms).toLocaleDateString() : null)
+  const renews = when(l.renewsAt)
+  return `
+    <div class="set-group">
+      <div class="set-gh">Orbit Pro</div>
+      <div class="set-f"><span>Status<em>${esc(l.detail)}</em></span><div class="set-row">${pill(tone, label)}</div></div>
+      ${
+        l.key
+          ? `<div class="set-f"><span>Licence key<em>${renews ? `${l.cancelAtPeriodEnd ? 'ends' : 'renews'} ${renews}` : 'on this Mac'}</em></span>
+              <div class="set-row"><code class="set-key">${esc(l.key)}</code></div></div>
+             <div class="set-f"><span>Checked<em>Pro keeps working offline for 14 days</em></span>
+              <div class="set-row"><button data-act="lic-check"${licenceBusy === 'check' ? ' disabled' : ''}>${licenceBusy === 'check' ? 'Checking…' : 'Check now'}</button>
+              ${confirmBtn('lic-remove', 'Remove', 'Click again to remove')}</div></div>`
+          : `<div class="set-f"><span>Licence key<em>From your purchase email, or laikaorbit.com/pro/account</em></span>
+              <div class="set-row"><input class="set-in" data-lic-in value="${esc(licenceInput)}" placeholder="LO1.…" autocomplete="off" spellcheck="false" />
+              <button data-act="lic-activate"${licenceBusy === 'activate' ? ' disabled' : ''}>${licenceBusy === 'activate' ? 'Checking…' : 'Activate'}</button></div></div>`
+      }
+    </div>
+    <div class="set-note">Laika Orbit is free and open source. Pro pays for the signed app, automatic
+      updates and support; nothing in the app stops working without it.</div>`
 }
 
 // ---------------------------------------------------------------- privacy ----
@@ -558,7 +623,7 @@ function privacySection(): string {
         The only outside service it talks to is Google, to sync Gmail and Calendar.</span></div></div>
     <div class="set-group flush">
       ${row('link', 'Google app keys & calendar addresses', s.envLocal?.path ?? '.env.local', 'Secrets', s.envLocal?.ignored)}
-      ${row('mail', 'Gmail sign-in', 'macOS Keychain · laika-1brain gmail', 'Read-only access. Disconnect revokes it at Google.')}
+      ${row('mail', 'Gmail sign-in', 'macOS Keychain · laika-orbit gmail', 'Read-only access. Disconnect revokes it at Google.')}
       ${row('profile', 'Your profile', s.profile?.path ?? '', 'Name, addresses, time zone', s.profile?.ignored)}
       ${row('chart', 'Synced email & calendar', s.synced?.path ?? '', 'Account, counts, unread senders and subjects, event titles', s.synced?.ignored)}
       ${row('apps', 'Widget layout', s.widgetLayout?.path ?? '', 'Order, sizes, collapsed', s.widgetLayout?.ignored)}
@@ -626,7 +691,9 @@ function render() {
           ? themesSection()
           : st.section === 'app'
             ? appSection()
-            : privacySection()
+            : st.section === 'licence'
+              ? licenceSection()
+              : privacySection()
   const title = SECTIONS.find(([k]) => k === st.section)
   const c = st.data?.connections
   const attention =
@@ -729,6 +796,7 @@ function bind(root: HTMLElement) {
       return
     }
     const sec = t.closest<HTMLElement>('[data-sec]')?.dataset.sec as Section | undefined
+    if (sec === 'licence' && !licence) void loadLicence().then(render)
     if (sec) {
       st.section = sec
       st.error = ''
@@ -826,13 +894,52 @@ function bind(root: HTMLElement) {
         return render()
       case 'reset-widths':
         try {
-          localStorage.removeItem('1brain:rail-l-w')
-          localStorage.removeItem('1brain:rail-r-w')
+          localStorage.removeItem('orbit:rail-l-w')
+          localStorage.removeItem('orbit:rail-r-w')
         } catch {}
         document.documentElement.style.removeProperty('--rail-l')
         document.documentElement.style.removeProperty('--rail-r')
         notify('Column widths reset')
         return renderFoot()
+      case 'lic-activate': {
+        const input = root.querySelector<HTMLInputElement>('[data-lic-in]')
+        const key = (input?.value || licenceInput).trim()
+        if (!key) return input?.focus()
+        licenceBusy = 'activate'
+        render()
+        try {
+          const r = await api<{ ok: boolean; error?: string }>('/api/license/activate', {
+            method: 'POST',
+            body: JSON.stringify({ key }),
+          })
+          licenceBusy = ''
+          if (r.ok) licenceInput = ''
+          await loadLicence()
+          render()
+          notify(r.ok ? 'Orbit Pro activated' : (r.error ?? 'That key was not accepted'))
+        } catch (e) {
+          licenceBusy = ''
+          await loadLicence()
+          render()
+          notify(String((e as Error)?.message ?? 'That key was not accepted'))
+        }
+        return
+      }
+      case 'lic-check':
+        licenceBusy = 'check'
+        render()
+        await loadLicence(true)
+        licenceBusy = ''
+        render()
+        return notify(licence?.pro ? 'Licence checked' : (licence?.detail ?? 'Checked'))
+      case 'lic-remove':
+        if (!armed(act)) return
+        return run('Removing licence', async () => {
+          await api<unknown>('/api/license/deactivate', { method: 'POST' })
+          await loadLicence()
+          render()
+          notify('Licence removed from this Mac')
+        })
       case 'reset-layout':
         if (!armed(act)) return
         return run('Resetting widgets', async () => {
@@ -849,6 +956,10 @@ function bind(root: HTMLElement) {
       st.api?.setRail(Number(el.dataset.i), !el.checked)
       return render()
     }
+    if (el.dataset.act === 'dev') {
+      setDevFeatures(el.checked)
+      return render()
+    }
     // Only selects re-render on change. A text field's change fires on blur — i.e. on the
     // mousedown of the Save button — and re-rendering then would swallow that click.
     if (el.dataset.p && el.tagName === 'SELECT') {
@@ -861,6 +972,10 @@ function bind(root: HTMLElement) {
     const el = e.target as HTMLInputElement
     if (el.hasAttribute('data-email-in')) {
       st.emailInput = el.value
+      return
+    }
+    if (el.hasAttribute('data-lic-in')) {
+      licenceInput = el.value
       return
     }
     if (!el.dataset.p || el.tagName === 'SELECT') return
@@ -1011,6 +1126,7 @@ export async function openSettings(section?: Section) {
   render()
   st.root.querySelector<HTMLElement>(`[data-sec="${st.section}"]`)?.focus({ preventScroll: true })
   await run('Loading', load)
+  void loadLicence().then(() => st.section === 'licence' && render())
   // live status: a Google sign-in finishing in another tab, a sync landing
   clearInterval(st.poll)
   st.poll = window.setInterval(async () => {

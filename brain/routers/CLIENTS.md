@@ -5,5 +5,5 @@
 
 ## 2 — delivery
 
-- Skills: 1brain index — rebuild the index after adding client material
+- Skills: Laika Orbit index — rebuild the index after adding client material
 - Reference: outputs/ — generated briefs and reports

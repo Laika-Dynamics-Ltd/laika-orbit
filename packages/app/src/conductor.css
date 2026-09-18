@@ -162,6 +162,135 @@
 .ss-lead-toggle[aria-pressed='true'] b::after { content: ' ✓'; color: var(--lead) }
 .ss-chat.new.conductor .ss-mark { background: var(--lead) !important }
 
+/* ------------------------------------------------------------------ I'm away: the switch and the banner */
+#ss .ss-away-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  margin-right: 4px;
+  padding: 0 11px;
+  border: 1px solid color-mix(in srgb, var(--lead) 45%, var(--c-line));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--lead) 8%, transparent);
+  color: var(--c-text);
+  font: 560 12.5px/1 ui-sans-serif, -apple-system, system-ui, sans-serif;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+#ss .ss-away-btn:hover { background: color-mix(in srgb, var(--lead) 18%, transparent) }
+#ss .ss-away-btn:focus-visible { outline: 2px solid var(--lead); outline-offset: 1px }
+#ss .ss-away-btn .aw-moon { color: var(--lead); font-size: 13px }
+#ss .ss-away-btn.on { background: var(--lead); border-color: var(--lead); color: var(--lead-on); font-weight: 650 }
+#ss .ss-away-btn.on .aw-moon { color: var(--lead-on) }
+
+.ss-away {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 8px 14px;
+  border-bottom: 1px solid color-mix(in srgb, var(--lead) 28%, var(--c-line));
+  background: color-mix(in srgb, var(--lead) 9%, var(--n2));
+  font-size: 12.5px;
+}
+.ss-away[hidden] { display: none }
+.ss-away .aw-sun { color: var(--lead); font-size: 15px }
+.aw-what { display: flex; flex-direction: column; min-width: 0; flex: 1 1 200px }
+.aw-what b { color: var(--lead-ink); font-size: 13px; font-variant-numeric: tabular-nums }
+.aw-what span { color: var(--c-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+.aw-acts { display: flex; gap: 6px; flex-wrap: wrap }
+.aw-acts button {
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 11px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--lead) 40%, var(--c-line));
+  background: transparent;
+  color: var(--c-text);
+  cursor: pointer;
+}
+.aw-acts button:hover { background: color-mix(in srgb, var(--lead) 16%, transparent) }
+.aw-acts button:focus-visible { outline: 2px solid var(--lead); outline-offset: 1px }
+.aw-acts .aw-go { background: var(--lead); border-color: var(--lead); color: var(--lead-on); font-weight: 600 }
+.aw-acts .aw-go:hover { background: var(--lead-hi) }
+
+.aw-durs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 12px }
+.aw-durs button {
+  font: inherit;
+  font-size: 13px;
+  min-width: 46px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--lead) 40%, var(--c-line));
+  background: transparent;
+  color: var(--c-text);
+  cursor: pointer;
+}
+.aw-durs button:hover { background: color-mix(in srgb, var(--lead) 14%, transparent) }
+.aw-durs button[aria-checked='true'] { background: var(--lead); border-color: var(--lead); color: var(--lead-on); font-weight: 650 }
+.aw-durs button:focus-visible { outline: 2px solid var(--lead); outline-offset: 1px }
+.aw-custom { display: inline-flex; align-items: center; gap: 6px; color: var(--c-dim); font-size: 12.5px }
+#ss .aw-custom .dlg-in { width: 84px; margin-top: 0 }
+.aw-dlg .ss-err { margin-top: 8px }
+.aw-dlg .ss-err[hidden] { display: none }
+#ss .aw-link { font: inherit; padding: 0; border: 0; background: none; color: var(--lead-ink); text-decoration: underline; cursor: pointer }
+.aw-allowed .dlg { max-height: min(560px, 100%); overflow: auto }
+.aw-allowed h4 { margin: 14px 0 6px; font-size: 12px; font-weight: 600; color: var(--c-dim); text-transform: uppercase; letter-spacing: 0.04em }
+.aw-pats { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px }
+.aw-pats li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 3px 4px 3px 8px; border: 1px solid var(--c-line); border-radius: 6px }
+.aw-allowed code { font: 12px ui-monospace, Menlo, monospace; overflow-wrap: anywhere }
+#ss .aw-pats button { flex: none; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--c-dim); font-size: 15px; line-height: 1; cursor: pointer }
+#ss .aw-pats button:hover:not(:disabled) { background: color-mix(in srgb, var(--lead) 16%, transparent); color: var(--c-text) }
+#ss .aw-pats button:focus-visible { outline: 2px solid var(--lead); outline-offset: 1px }
+.aw-allowed .aw-none { margin-top: 0 }
+.aw-allowed .aw-codes { display: flex; flex-wrap: wrap; gap: 4px 6px; margin-top: 6px }
+.aw-defaults { margin-top: 12px; font-size: 12.5px; color: var(--c-dim) }
+.aw-defaults summary { cursor: pointer }
+
 @media (prefers-reduced-motion: reduce) {
   .ss-chat.conductor.away::before, .cd-pulse, #ss .ws-chat.conductor.away .ws-crown { animation: none }
 }
+@media (max-width: 640px) {
+  #ss .ss-away-btn [data-el='awaylbl'] { display: none }
+}
+
+/* ------------------------------------------------------------------ the cockpit (cockpit.ts) */
+.cd-deck-t {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font: 500 12px system-ui, sans-serif;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--c-line);
+  background: transparent;
+  color: var(--c-dim);
+  cursor: pointer;
+}
+.cd-deck-t:hover { color: var(--c-text); border-color: color-mix(in srgb, var(--lead) 40%, var(--c-line)) }
+.cd-deck-t span { font-size: 10px }
+/* as tall as its lanes, never a fixed block: a quiet fleet leaves the log its room. The grip moves
+   the cap (--deck-h); the log keeps 40% of the window whatever the deck or a wrapped banner take */
+.cd-deck {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: var(--deck-h, 34%);
+  display: flex;
+  border-bottom: 1px solid var(--c-line);
+  background: color-mix(in srgb, var(--n2) 55%, transparent);
+}
+.cd-deck > .ck { flex: 1; min-width: 0 }
+.ss-chat.conductor > .ss-log { min-height: 40% }
+.cd-grip {
+  flex: none;
+  height: 6px;
+  margin-top: -3px;
+  margin-bottom: -3px;
+  position: relative;
+  z-index: 3;
+  cursor: row-resize;
+}
+.cd-grip:hover { background: linear-gradient(transparent 2px, color-mix(in srgb, var(--lead) 50%, transparent) 2px 4px, transparent 4px) }
+.ss-chat.conductor.deck-shut > .cd-deck, .ss-chat.conductor.deck-shut > .cd-grip { display: none }

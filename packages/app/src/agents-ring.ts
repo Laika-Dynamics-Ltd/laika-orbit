@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import './agents-ring.css'
+import * as activity from './activity.ts'
 
 /**
  * Live agent state on the ARMS ring, so one glance at the map says where work needs you.
@@ -208,9 +209,9 @@ export function createAgentsRing(
       placeAgents()
     } catch {}
   }
-  setInterval(poll, 5_000)
+  activity.every(5_000, poll, { now: false })
   // ages in the labels keep moving between changes
-  setInterval(() => active && placeAgents(), 30_000)
+  activity.every(30_000, () => active && placeAgents(), { now: false })
 
   // ------------------------------------------------------------ live activity
   // Claude sessions running in the app (sessions.ts) report each tool call. A beam runs from
@@ -522,6 +523,8 @@ export function createAgentsRing(
   }
 
   return {
+    /** true while a session's beam pulses or fades, so the map keeps drawing */
+    animating: () => active && beams.length > 0,
     /** call after the ARMS layout: node positions, and the radii to draw between */
     build(o: {
       nodes: RingNode[]

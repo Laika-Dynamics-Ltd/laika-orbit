@@ -1,0 +1,26 @@
+/* The opt-in card: bottom-right, out of the way of the map and the rails. */
+.pc-card {
+  position: fixed; right: 18px; bottom: 18px; z-index: 60; width: 290px;
+  background: rgba(12, 18, 30, .93); border: 1px solid rgba(86, 216, 255, .2);
+  border-radius: 12px; padding: 14px 16px; backdrop-filter: blur(12px);
+  box-shadow: 0 12px 34px rgba(0, 0, 0, .46);
+  color: #cfe3f5; font-size: 12.5px; line-height: 1.5;
+  opacity: 0; transform: translateY(10px); transition: opacity .22s ease, transform .22s ease;
+}
+.pc-card.in { opacity: 1; transform: none; }
+.pc-card h3 { margin: 0 0 7px; font-size: 13.5px; color: #eaf4ff; font-weight: 600; }
+.pc-card p { margin: 0 0 8px; color: #9db6cb; }
+.pc-card p b { color: #cfe3f5; font-weight: 600; }
+.pc-fine { font-size: 11.5px; color: #6e8aa4 !important; }
+.pc-row { display: flex; gap: 8px; margin-top: 11px; }
+.pc-row button {
+  flex: 1; border-radius: 7px; padding: 7px 10px; font: inherit; font-size: 12.5px;
+  cursor: pointer; border: 1px solid transparent; transition: filter .15s, background .15s;
+}
+.pc-no { background: rgba(255, 255, 255, .06); color: #a9c0d4; border-color: rgba(255,255,255,.1) !important; }
+.pc-no:hover { background: rgba(255, 255, 255, .11); }
+.pc-yes { background: #ff8a4c; color: #1a0f07; font-weight: 600; }
+.pc-yes:hover { filter: brightness(1.08); }
+.pc-more { display: inline-block; margin-top: 9px; font-size: 11.5px; color: #56d8ff; text-decoration: none; }
+.pc-more:hover { text-decoration: underline; }
+@media (prefers-reduced-motion: reduce) { .pc-card { transition: none; } }

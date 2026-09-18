@@ -1,0 +1,212 @@
+/* The floating player — ships with youtube.ts. A small window that sits over everything and
+   goes wherever it is dragged, so music keeps playing while the page underneath changes.
+   The three row heights (30 / 34 / 34) are also in youtube.ts, which measures the window to
+   keep it on screen; change them together. */
+#ytp {
+  position: fixed;
+  z-index: 90;
+  /* always grabbable, even partly over the shell's window-drag top bar */
+  -webkit-app-region: no-drag;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--n15);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--n4) 92%, transparent);
+  backdrop-filter: blur(24px) saturate(1.4);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  box-shadow: 0 28px 70px -24px var(--n0), 0 6px 18px -10px var(--n0);
+  color: var(--n32);
+  font: 500 11.5px/1.3 ui-sans-serif, -apple-system, system-ui, sans-serif;
+  animation: yt-in 0.14s cubic-bezier(0.2, 0.9, 0.25, 1);
+}
+#ytp[hidden] { display: none }
+/* no transition while it is being dragged or resized: it must track the pointer exactly */
+#ytp.dragging { animation: none; box-shadow: 0 34px 90px -22px var(--n0) }
+@keyframes yt-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.98) }
+  to { opacity: 1; transform: none }
+}
+
+/* ------------------------------------------------------------------ title bar ---- */
+#ytp .yt-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 4px 0 9px;
+  border-bottom: 1px solid var(--n11);
+  background: rgba(var(--hl), 0.025);
+  cursor: grab;
+  user-select: none;
+}
+#ytp.dragging .yt-bar { cursor: grabbing }
+#ytp .yt-dot {
+  position: relative;
+  flex: none;
+  width: 15px;
+  height: 11px;
+  border-radius: 3px;
+  background: var(--err);
+}
+#ytp .yt-dot::after {
+  content: '';
+  position: absolute;
+  inset: 3px 5px 3px 6px;
+  background: var(--n37);
+  clip-path: polygon(0 0, 100% 50%, 0 100%);
+}
+#ytp .yt-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--n31);
+  font-size: 11px;
+  letter-spacing: 0.01em;
+}
+
+#ytp .yt-btn {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--n26);
+  font: 400 15px/1 ui-sans-serif, -apple-system, system-ui, sans-serif;
+  cursor: pointer;
+  transition: background-color 0.12s, color 0.12s;
+}
+#ytp .yt-btn:hover { background: rgba(var(--hl), 0.07); color: var(--n35) }
+#ytp .yt-btn:focus-visible { outline: 2px solid var(--acc); outline-offset: -1px }
+#ytp .yt-x:hover { background: var(--err-bg); color: var(--err-lt) }
+#ytp.playing .yt-play { color: var(--acc) }
+
+/* ----------------------------------------------------------------- the omnibox ---- */
+#ytp .yt-omni {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--n11);
+}
+#ytp .yt-in {
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--n13);
+  border-radius: 6px;
+  background: var(--n2);
+  color: var(--n34);
+  font: 500 11px/1 ui-sans-serif, -apple-system, system-ui, sans-serif;
+}
+#ytp .yt-in::placeholder { color: var(--n23) }
+#ytp .yt-in:focus { outline: none; border-color: var(--acc-bd); background: var(--n3) }
+#ytp .yt-go {
+  flex: none;
+  height: 22px;
+  padding: 0 10px;
+  border: 1px solid var(--n15);
+  border-radius: 6px;
+  background: var(--n9);
+  color: var(--n32);
+  font: 600 10.5px/1 ui-sans-serif, -apple-system, system-ui, sans-serif;
+  letter-spacing: var(--tr-label);
+  text-transform: uppercase;
+  cursor: pointer;
+}
+#ytp .yt-go:hover { background: var(--n12); color: var(--n36) }
+
+/* --------------------------------------------------------------------- stage ---- */
+#ytp .yt-stage {
+  position: relative;
+  flex: none;
+  height: var(--yt-stage-h, 236px);
+  background: var(--n0);
+}
+#ytp .yt-frame { position: absolute; inset: 0; width: 100%; height: 100%; border: 0 }
+/* a drag must not be swallowed by the embed: the pointer stops at the window while moving */
+#ytp.dragging .yt-frame { pointer-events: none }
+#ytp .yt-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  align-content: center;
+  gap: 6px;
+  padding: 0 22px;
+  text-align: center;
+}
+#ytp .yt-empty b { color: var(--n30); font-size: 12px }
+#ytp .yt-empty span { color: var(--n24); font-size: 10.5px; line-height: 1.45 }
+#ytp.has-src .yt-empty { display: none }
+
+/* -------------------------------------------------------------------- footer ---- */
+#ytp .yt-foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 34px;
+  padding: 0 8px 0 5px;
+  border-top: 1px solid var(--n11);
+  background: rgba(var(--hl), 0.02);
+}
+#ytp .yt-time {
+  flex: none;
+  color: var(--n25);
+  font: 500 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+}
+#ytp input[type='range'] {
+  height: 14px;
+  margin: 0;
+  accent-color: var(--acc);
+  cursor: pointer;
+}
+#ytp .yt-seek { flex: 1; min-width: 30px }
+#ytp .yt-seek:disabled { opacity: 0.4; cursor: default }
+#ytp .yt-vol { flex: none; width: 54px }
+
+/* -------------------------------------------------------------------- resize ---- */
+#ytp .yt-rsz {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 15px;
+  height: 15px;
+  cursor: nwse-resize;
+  background: linear-gradient(
+    135deg,
+    transparent 0 52%,
+    rgba(var(--hl), 0.22) 52% 62%,
+    transparent 62% 74%,
+    rgba(var(--hl), 0.22) 74% 84%,
+    transparent 84%
+  );
+}
+
+/* ---------------------------------------------------------------------- mini ---- */
+/* The stage is pushed below the window's clip instead of hidden: an iframe with
+   `display:none` is allowed to drop its audio, a clipped one keeps playing. */
+#ytp.mini .yt-omni { display: none }
+#ytp.mini .yt-stage {
+  position: absolute;
+  left: 0;
+  top: 100%;
+  width: 100%;
+  pointer-events: none;
+}
+#ytp.mini .yt-rsz { display: none }
+
+@media (prefers-reduced-motion: reduce) {
+  #ytp { animation: none }
+}

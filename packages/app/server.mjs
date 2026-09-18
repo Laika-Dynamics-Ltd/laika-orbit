@@ -1,5 +1,5 @@
 /**
- * laika-1brain app server. One process, one port:
+ * Laika Orbit app server. One process, one port:
  *   - Vite in middleware mode  → HMR for the UI
  *   - /api/*                   → the real @laika/core engine over the real workspace
  * No separate API port, so fetch() is same-origin and nothing needs a proxy.
@@ -9,8 +9,17 @@ import { resolve, dirname, join, sep } from 'node:path'
 import { existsSync, createReadStream } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { createServer as createVite, searchForWorkspaceRoot } from 'vite'
-import { agentsWidget, handleControl } from './control-api.mjs'
+import { agentsWidget, handleControl, localChats } from './control-api.mjs'
 import { handleMission } from './mission-api.mjs'
+import { handleRuns } from './runs-api.mjs'
+import { handleCommands } from './commands.mjs'
+import { handleProfiler } from './profiler-api.mjs'
+import { handlePulse } from './pulse-api.mjs'
+import { handleUsers } from './users-api.mjs'
+import { startReporting } from './pulse-client.mjs'
+import { handleSupabase } from './supabase.mjs'
+import { handleLicense } from './license.mjs'
+import { handleVoice } from './voice.mjs'
 import { readdir, readFile as fsRead, writeFile, mkdir, stat, realpath, rename, rm } from 'node:fs/promises'
 import { execFile, execFileSync } from 'node:child_process'
 import { promisify } from 'node:util'
@@ -23,13 +32,15 @@ import {
 } from '@laika/core'
 
 import { refreshCalendar } from './feeds/calendar.mjs'
+import { startLoadWatch } from './feeds/loadwatch.mjs'
 import { sysres } from './feeds/sysres.mjs'
 import { authorizeUrl, deleteRefreshToken, exchangeCode, readRefreshToken, refreshEmail, resetEmailCache, revokeToken, saveRefreshToken } from './feeds/gmail.mjs'
 import { createHash, randomBytes } from 'node:crypto'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 // feed credentials (the calendar's secret iCal address) live here, never in the repo
-try { process.loadEnvFile(resolve(HERE, '../../.env.local')) } catch {}
+// the standalone app keeps secrets in Application Support (LAIKA_ENV_FILE); a checkout keeps them at its root
+try { process.loadEnvFile(process.env.LAIKA_ENV_FILE ?? resolve(HERE, '../../.env.local')) } catch {}
 /**
  * Which corpus this instance is about. `--root` beats BRAIN_ROOT beats the repo itself, so
  * pointing an instance at another project is a flag rather than an exported variable you have
@@ -42,6 +53,8 @@ const argRoot = (() => {
 })()
 const ROOT = resolve(argRoot ?? process.env.BRAIN_ROOT ?? resolve(HERE, '../..'))
 const PORT = Number(process.env.PORT || 5200)
+/** notices when this Mac stays under pressure, names what is heavy, and steers new work to other machines */
+const loadWatch = startLoadWatch({ chats: localChats })
 // Showreel Studio lives in its own repo, a sibling checkout unless SHOWREEL_DIR says otherwise.
 // Its API is mounted at /api/showreel and its page is drawn into the Showreel window.
 // "Sibling" means beside the main checkout, so a worktree (the stable app's snapshot) finds it too.
@@ -116,6 +129,17 @@ let versionCache = null
 let versionAt = 0
 async function appVersion() {
   if (versionCache && Date.now() - versionAt < 10_000) return versionCache
+  // a standalone build has no repo: its version was written when it was built, and git is never run
+  // (on a Mac without the command line tools, running git pops up an install prompt)
+  if (process.env.LAIKA_VERSION_FILE) {
+    try {
+      versionCache = JSON.parse(await fsRead(process.env.LAIKA_VERSION_FILE, "utf8"))
+    } catch {
+      versionCache = { version: '0.0', build: 0, hash: null, dirty: false, subject: null, date: null, label: 'v0.0' }
+    }
+    versionAt = Date.now()
+    return versionCache
+  }
   try {
     const [count, hash, dirty, subject, date] = await Promise.all([
       git('rev-list', '--count', 'HEAD'),
@@ -386,10 +410,10 @@ const WIDGET_DIR = resolve(ROOT, 'brain', 'widgets')
 // formats it renders well are offered — documents, slides, PDFs, HTML and images; text and
 // code are previewed as text by the app instead. qlmanage hangs on some source files, so
 // every run has a hard timeout, and an image that it cannot draw falls back to sips.
-// Thumbnails are cached under .1brain/cache/thumbs, keyed by path, mtime and size.
+// Thumbnails are cached under .orbit/cache/thumbs, keyed by path, mtime and size.
 const THUMBABLE = /\.(pdf|docx?|pptx?|rtf|odt|pages|key|numbers|html?|png|jpe?g|gif|webp|svg|avif|heic|bmp|tiff?)$/i
 const THUMB_SIZES = [160, 320, 640]
-const THUMB_DIR = resolve(ROOT, '.1brain', 'cache', 'thumbs')
+const THUMB_DIR = resolve(ROOT, '.orbit', 'cache', 'thumbs')
 const THUMB_TIMEOUT_MS = 8000
 const thumbJobs = new Map() // key → promise, so a burst of hovers renders each file once
 let thumbRunning = 0
@@ -756,9 +780,29 @@ createHttp(async (req, res) => {
     }
     // Mission Control: the rail's panel and each repo's own (see mission-api.mjs)
     if (await handleMission(url, req, res, { allowed: knownFolders })) return
+    // runs: every chat's lanes, jobs, artefacts and verdicts on one page (see runs-api.mjs)
+    if (await handleRuns(url, req, res)) return
+    // commands a project registered (commands.mjs): the palette's and a run's "Run again"
+    if (await handleCommands(url, req, res)) return
+    // the profiler panel: the /profiler skill's sampler, passed through (see profiler-api.mjs)
+    if (await handleProfiler(url, req, res)) return
+    // adoption pulse: the public + opted-in node network at /pulse (see pulse-api.mjs)
+    if (await handlePulse(url, req, res)) return
+    // the Users panel: waitlist, Stripe and opt-in usage as people (see users-api.mjs)
+    if (await handleUsers(url, req, res)) return
+    // voice prompting: local whisper transcription (see voice.mjs)
+    // Orbit Pro licence: activation and status (see license.mjs)
+    if (await handleLicense(url, req, res)) return
+    if (await handleVoice(url, req, res)) return
+    // Supabase: each account's projects, their schemas and the SQL console (see supabase.mjs)
+    if (await handleSupabase(url, req, res)) return
     if (url.pathname === '/api/version') {
       res.writeHead(200, { 'content-type': 'application/json' })
       return res.end(JSON.stringify(await appVersion()))
+    }
+    if (url.pathname === '/api/loadwatch') {
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+      return res.end(JSON.stringify(loadWatch.state()))
     }
     if (url.pathname === '/api/sysres') {
       res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' })
@@ -1098,5 +1142,7 @@ createHttp(async (req, res) => {
   console.log(`  email         →  ${{ off: 'off (GMAIL_FEED=0)', unconfigured: 'no Gmail app (set GOOGLE_CLIENT_ID/SECRET in .env.local)', starting: `Gmail API every ${EMAIL_SECS}s` }[email.status] ?? email.status}`)
   console.log(`  calendar      →  ${CAL_URLS.length ? `${CAL_URLS.length} iCal feed(s) every ${CAL_MINS}m` : 'no feed (set CALENDAR_ICS_URLS in .env.local)'}`)
   console.log(`  showreel      →  ${showreel ? SHOWREEL_DIR : `not found (clone laika-showreel to ${SHOWREEL_DIR}, or set SHOWREEL_DIR)`}`)
+  // reporting only ever starts when this Mac has opted in; startReporting is a no-op otherwise
+  appVersion().then((v) => startReporting({ app: v.version }))
   console.log(`  HMR live. Edit packages/app/src/*.ts and the browser updates.\n`)
 })

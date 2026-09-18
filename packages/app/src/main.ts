@@ -2,31 +2,53 @@ import * as THREE from 'three'
 import { openBrainWindow } from './brain-panel.ts'
 import { createBrowser } from './browser.ts'
 import { bindCalendar } from './calendar.ts'
+import { mountCockpit } from './cockpit.ts'
 import { createCore } from './core.ts'
 import { makeHUD } from './hud.ts'
 import { createJarvis } from './jarvis.ts'
 import { LabelLayer, type LabelSpec } from './labels.ts'
+import { mountQueue, queueCounts } from './queue-view.ts'
 import { initSettings, openSettings } from './settings-panel.ts'
 import './control.css'
 import { createAgentsRing } from './agents-ring.ts'
+import { startAutopilot } from './autopilot-panels.ts'
 import { mountControl, type Session, sessionNotifier } from './control.ts'
-import { createHistory } from './history.ts'
+import { devFeatures } from './devfeatures.ts'
+import { registerHistoryPanel } from './history.ts'
 import { closeMission, isMissionOpen, openMission, watchMission } from './mission.ts'
 import { createNodePreview } from './node-preview.ts'
 import { canPop, POP_ICON, popOut, watchPop } from './popout.ts'
+import './pulse-consent.ts'
+import { registerProfilerPanel } from './profiler-panel.ts'
+import { openPulse } from './pulse-panel.ts'
 import { createQuickLook, type QLItem } from './quicklook.ts'
 import { createRoutinesRing, hoursOf } from './routines-ring.ts'
+import { registerRunsPanel } from './runs-panel.ts'
 import { createSessions } from './sessions.ts'
 import { closeShowreel, isShowreelOpen, openShowreel } from './showreel.ts'
 import './sysres.ts'
+import './offload.ts'
+import * as activity from './activity.ts'
+import {
+  closeTopPanel,
+  panelCommands,
+  registerPanel,
+  restorePanels,
+  ruleCommands,
+  windowCommands,
+  workspaceCommands,
+} from './panels.ts'
 import { createSpotlight, type SpotCommand } from './spotlight.ts'
+import { registerDatabasesPanel } from './supabase.ts'
 import { applyTheme, initTheme, themeId } from './themes.ts'
+import { registerUsersPanel } from './users-panel.ts'
 import { initWidgetDrag, isDragging } from './widget-drag.ts'
 import { initWidgetFold, isFolding } from './widget-fold.ts'
 import { initWidgetResize, isResizing } from './widget-resize.ts'
 import { openWidgetSettings, patch as patchWidgets, restoreHidden } from './widget-settings.ts'
 import { renderRail, tickClocks, type Widget } from './widgets.ts'
 import { createWorkbench } from './workbench.ts'
+import { createYouTube } from './youtube.ts'
 
 type Node = {
   id: number
@@ -115,6 +137,10 @@ let stageShown = true
 /** the chats panel (#ss), found on the first frame: it is built after the map */
 let chatsEl: HTMLElement | null = null
 const fit = () => {
+  // the dock animates its column for ~180ms; measuring the stage on every frame of that would
+  // reallocate the WebGL drawing buffer 11 times. panels.ts holds `pnl-anim` for the slide and
+  // fires `laika:panels-settled` once at the end (see the header of panels.ts).
+  if (document.body.classList.contains('pnl-anim')) return
   const r = stage.getBoundingClientRect()
   stageShown = r.width >= 2 && r.height >= 2
   // a zero-size stage would leave the camera with a NaN aspect; the next resize fits it again
@@ -124,6 +150,11 @@ const fit = () => {
   camera.updateProjectionMatrix()
 }
 addEventListener('resize', fit)
+// a panel opened, closed or was dragged wider: one real resize, once the column has stopped
+addEventListener('laika:panels-settled', () => {
+  fit()
+  requestAnimationFrame(() => checkCovered())
+})
 
 // GPU colour-ID picking: each node renders a unique colour into a 1x1 scissored
 // read. O(1) per pick regardless of node count — raycasting 60k points is not viable.
@@ -1689,29 +1720,202 @@ const ringProbe = new THREE.Vector3()
   },
 }
 
+/** untouched this long, the map is idle: no drift, and frames only for what still moves */
+const IDLE_AFTER = 20_000
+/** idle frame gap while something still animates (~15fps: the rings turn slowly) */
+const AMBIENT_MS = 66
+/** idle frame gap with nothing moving: late data and the clock hand still show within a second */
+const HEARTBEAT_MS = 1000
+
+/** true while page UI with a solid background (history, mission control, a full panel) hides the
+ *  whole stage: the map is out of view, so it stops drawing until something uncovers it */
+let stageCovered = false
+/** how much of the window shows map, 0–1: the stage's size times the share of it left uncovered */
+let stageShare = 1
+/** less than this and the map is only glimpsed (a strip beside panels, a blur under frosted UI):
+ *  it draws at GLIMPSE_MS while you use the app and once a second when idle */
+const GLIMPSE_SHARE = 0.2
+const GLIMPSE_MS = 250
+/** the pointer is over the map: whatever shows of it gets full rate */
+let pointerOnStage = false
+stage.addEventListener('pointerenter', () => {
+  pointerOnStage = true
+  wakeMap()
+})
+stage.addEventListener('pointerleave', () => {
+  pointerOnStage = false
+})
+/** a 5 × 3 grid over the stage */
+const COVER_PROBES: [number, number][] = [0.15, 0.5, 0.85].flatMap((fy) =>
+  [0.1, 0.3, 0.5, 0.7, 0.9].map((fx): [number, number] => [fx, fy]),
+)
+const alphaOf = (c: string) => {
+  if (c === 'transparent') return 0
+  const slash = c.match(/\/\s*([\d.]+)(%?)\s*\)$/)
+  if (slash) return Number(slash[1]) / (slash[2] ? 100 : 1)
+  const rgba = c.match(/^rgba\((?:[^,]+,){3}\s*([\d.]+)\)$/)
+  return rgba ? Number(rgba[1]) : 1
+}
+/**
+ * Does page UI at (x, y) hide the stage there? Nearly opaque counts (85%), and so does frosted
+ * UI: under a backdrop blur the map is a smear, and redrawing it also re-blurs the panel on
+ * every frame. A faded element is looked through to what it sits on.
+ */
+function coveredAt(x: number, y: number) {
+  for (let e = document.elementFromPoint(x, y); e && e !== document.body; e = e.parentElement) {
+    // inside the stage, or a wrapper the stage sits in (and so paints behind it)
+    if (stage.contains(e) || e.contains(stage)) return false
+    const cs = getComputedStyle(e)
+    if (e instanceof HTMLIFrameElement || alphaOf(cs.backgroundColor) >= 0.85) return true
+    const blur = cs.backdropFilter || cs.getPropertyValue('-webkit-backdrop-filter')
+    if (blur && blur !== 'none') return true
+  }
+  return false
+}
+function checkCovered() {
+  if (document.hidden || !stageShown) return
+  // only the part of the stage inside the window: the stage box can run far past it, and a
+  // probe off screen finds nothing on top and would count as the map showing
+  const b = stage.getBoundingClientRect()
+  const x0 = Math.max(0, b.left)
+  const y0 = Math.max(0, b.top)
+  const w = Math.min(innerWidth, b.right) - x0
+  const h = Math.min(innerHeight, b.bottom) - y0
+  const seen =
+    w < 2 || h < 2
+      ? 0
+      : COVER_PROBES.filter(([fx, fy]) => !coveredAt(x0 + w * fx, y0 + h * fy)).length
+  const was = stageShare
+  stageCovered = seen === 0
+  stageShare = (seen / COVER_PROBES.length) * ((w * h) / (innerWidth * innerHeight))
+  // something may have uncovered it, or new data may want drawing: a sleeping loop looks again
+  // (one that is only napping until its next idle frame is left alone, unless it just came out
+  // from a glimpse into full view)
+  if (stageCovered) return
+  if ((!mapRaf && !mapNap) || (was < GLIMPSE_SHARE && stageShare >= GLIMPSE_SHARE)) wakeMap()
+}
+// stops while the window is hidden; a quarter as often while another app is in front
+activity.every(400, checkCovered)
+// closing a panel is a click or a key: look again at once rather than on the next tick. One look
+// per frame however many events came in, and none for transitions inside a chat: a streaming log
+// fires them in bursts, and each look forces a style pass over the page.
+let coverSoon = 0
+const coverNextFrame = () => {
+  coverSoon ||= requestAnimationFrame(() => {
+    coverSoon = 0
+    checkCovered()
+  })
+}
+for (const ev of ['pointerup', 'keyup'] as const)
+  addEventListener(ev, coverNextFrame, { passive: true })
+addEventListener(
+  'transitionend',
+  (e) => {
+    if (!(e.target as Element | null)?.closest?.('.ss-chat')) coverNextFrame()
+  },
+  { passive: true },
+)
+
+let lastInput = performance.now()
+for (const ev of ['pointermove', 'pointerdown', 'wheel', 'keydown'] as const)
+  addEventListener(
+    ev,
+    () => {
+      lastInput = performance.now()
+      wakeMap()
+    },
+    { passive: true, capture: true },
+  )
+activity.onLevel(() => wakeMap())
+addEventListener('resize', () => wakeMap())
+
+/**
+ * The loop only asks for frames while it draws. Paused (covered, hidden, squeezed out) it asks for
+ * none and waits for wakeMap; idle it naps until the next frame is due. A rAF left running with
+ * nothing to draw still costs a main-thread frame and a composite on every vsync.
+ */
+let mapRaf = 0
+let mapNap: ReturnType<typeof setTimeout> | null = null
+function wakeMap() {
+  if (mapNap) clearTimeout(mapNap)
+  mapNap = null
+  if (!mapRaf) mapRaf = requestAnimationFrame(frameMap)
+}
+function napMap(ms: number) {
+  if (mapNap || mapRaf) return
+  mapNap = setTimeout(() => {
+    mapNap = null
+    wakeMap()
+  }, ms)
+}
+function frameMap() {
+  mapRaf = 0
+  loop()
+}
+/** the camera has eased all the way to where it was asked to be */
+function cameraSettled() {
+  return (
+    Math.abs(want.theta - cam.theta) < 1e-4 &&
+    Math.abs(want.phi - cam.phi) < 1e-4 &&
+    Math.abs(want.radius - cam.radius) < 1e-3 &&
+    cam.target.distanceToSquared(want.target) < 1e-6
+  )
+}
+
 function loop() {
-  requestAnimationFrame(loop)
   const now = performance.now()
-  // nothing of the map shows under the browser, under chats that fill the window, or in a stage
-  // the wide docked chats have squeezed to nothing, so then it costs nothing
+  // nothing of the map shows under the browser, under chats that fill the window, under a panel
+  // that covers it, or in a stage the wide docked chats have squeezed to nothing, so then it
+  // costs nothing
   chatsEl ??= document.getElementById('ss')
   const chats = chatsEl?.classList.contains('on') ?? false
   if (
     document.body.classList.contains('wb-open') ||
     !stageShown ||
+    stageCovered ||
     (chats && !chatsEl?.classList.contains('dock'))
   ) {
+    // asleep until the cover check, input or a level change wakes it
     lastT = now
     return
   }
+  // mostly out of sight: a few frames a second while you use the app, a heartbeat when idle;
+  // pointing at it or dragging it brings it straight back to full rate
+  const glimpse = stageShare < GLIMPSE_SHARE && !dragging && !held.size && !pointerOnStage
+  if (glimpse) {
+    const gap = activity.atLeast('idle') ? HEARTBEAT_MS : GLIMPSE_MS
+    if (now - lastT < gap) return void napMap(gap - (now - lastT))
+    napMap(gap)
+  }
   // beside open chats the map runs at 30fps and leaves them the rest of each frame; a drag stays smooth
-  if (chats && !dragging && now - lastT < 28) return
+  if (!glimpse && chats && !dragging && now - lastT < 28) return void wakeMap()
+  // left alone, the map stops asking for frames: the drift ends, and once the camera has
+  // settled it draws only as fast as what still moves needs (the JARVIS rings, a recall, a
+  // running session's beam, a focus pulse), or once a second so data and the clock hand land.
+  // With another window in front it is idle at once, and what moves gets ~4fps.
+  // In the background the app is at its lowest: a heartbeat only. Idle, the JARVIS rings stop
+  // turning (decoration, not news); what reports something (a working agent's beam, the core's
+  // pulse, a recall, a focus) keeps the ambient rate.
+  const away = activity.atLeast('away')
+  const idle = away || now - Math.max(lastInput, idleSince) > IDLE_AFTER
+  if (idle && !dragging && !held.size && (away || (hoverIdx < 0 && cameraSettled()))) {
+    const moving =
+      core.animating() ||
+      agentsRing.animating() ||
+      focusIdx !== null ||
+      highlight.size > 0 ||
+      !cameraSettled()
+    const gap = away ? HEARTBEAT_MS : moving ? AMBIENT_MS : HEARTBEAT_MS
+    if (now - lastT < gap) return void napMap(gap - (now - lastT))
+    // draw this one, then nap straight to the next: no in-between frame just to find it too soon
+    napMap(gap)
+  } else if (!glimpse) wakeMap()
   // a tab in the background gets no frames; when it comes back, ease from here, don't jump
   const dtCam = Math.min(100, now - lastT)
   flyKeys(dtCam)
   // gentle idle drift, except in ARMS: the ring is an A→Z clock-face index there, and it
   // only reads if 12 o'clock stays put (the JARVIS rings still turn)
-  if (!dragging && layoutMode !== 'arms' && now - idleSince > 3500)
+  if (!dragging && !idle && layoutMode !== 'arms' && now - idleSince > 3500)
     want.theta += 0.066 * (dtCam / 1000)
 
   const step = 1 - Math.exp(-dtCam / EASE)
@@ -2551,7 +2755,7 @@ const GROUP_BY: [GroupBy, string][] = [
 const MAX_GROUPS = 24
 let groupBy: GroupBy = 'smart'
 try {
-  const saved = localStorage.getItem('1brain:group-by') as GroupBy | null
+  const saved = localStorage.getItem('orbit:group-by') as GroupBy | null
   if (saved && GROUP_BY.some(([k]) => k === saved)) groupBy = saved
 } catch {}
 
@@ -2586,7 +2790,7 @@ function applyGrouping() {
 function setGrouping(mode: GroupBy) {
   groupBy = mode
   try {
-    localStorage.setItem('1brain:group-by', mode)
+    localStorage.setItem('orbit:group-by', mode)
   } catch {}
   dimGroup = null
   applyGrouping()
@@ -2644,6 +2848,15 @@ function renderLegend() {
   }
 }
 
+/** the summary card's "now": the host writes a summary of the last hour, and the card shows it */
+async function writeSummaryNow(btn: HTMLElement) {
+  btn.textContent = '…'
+  try {
+    await fetch('/api/control/agent/summary', { method: 'POST', headers: { 'x-control': '1' } })
+  } catch {}
+  await loadWidgets()
+}
+
 async function loadWidgets() {
   try {
     widgets = await (await fetch('/api/widgets')).json()
@@ -2653,11 +2866,15 @@ async function loadWidgets() {
   renderOS()
 }
 
+let summaryRecapOpen = false
 function renderOS() {
   // a refresh mid-drag or mid-resize would pull the rail out from under the pointer
   if (isDragging() || isResizing() || isFolding()) return
   $('#rail-l').innerHTML = renderRail(widgets, 'left')
   $('#rail-r').innerHTML = renderRail(widgets, 'right')
+  // the summary card's away recap stays open across the minute refresh
+  if (summaryRecapOpen)
+    for (const d of document.querySelectorAll('.sm-recap')) d.setAttribute('open', '')
   tickClocks(document)
   for (const r of rails) fadeRail(r)
 }
@@ -2693,8 +2910,8 @@ async function load() {
   // ours is instant, so dismiss it or it dims the page and eats every click
   hud?.bootDone()
   await loadWidgets()
-  setInterval(() => tickClocks(document), 1000)
-  setInterval(loadWidgets, 60_000) // pick up whatever a producer has written
+  activity.every(1000, () => tickClocks(document))
+  activity.every(60_000, loadWidgets, { now: false }) // pick up whatever a producer has written
 }
 
 $('#qf').addEventListener('submit', (e) => {
@@ -2727,13 +2944,13 @@ const railKey = ['rail-l', 'rail-r']
 const setRail = (i: number, hidden: boolean) => {
   document.body.classList.toggle(`hide-${railKey[i]}`, hidden)
   try {
-    localStorage.setItem(`1brain:${railKey[i]}`, hidden ? '1' : '')
+    localStorage.setItem(`orbit:${railKey[i]}`, hidden ? '1' : '')
   } catch {}
 }
 const railHidden = (i: number) => document.body.classList.contains(`hide-${railKey[i]}`)
 for (const i of [0, 1]) {
   try {
-    if (localStorage.getItem(`1brain:${railKey[i]}`)) setRail(i, true)
+    if (localStorage.getItem(`orbit:${railKey[i]}`)) setRail(i, true)
   } catch {}
   $(`.rail-tab[data-rail="${i}"]`).addEventListener('click', () => setRail(i, !railHidden(i)))
 }
@@ -2748,6 +2965,14 @@ for (const r of rails) {
   r.addEventListener('scroll', () => fadeRail(r), { passive: true })
   new ResizeObserver(() => fadeRail(r)).observe(r)
   bindCalendar(r, renderOS)
+  r.addEventListener(
+    'toggle',
+    (e) => {
+      const d = e.target as HTMLElement
+      if (d.classList?.contains('sm-recap')) summaryRecapOpen = (d as HTMLDetailsElement).open
+    },
+    true,
+  )
   // widget header actions declared in brain/widgets/*.json
   r.addEventListener('click', (e) => {
     const t = e.target as HTMLElement
@@ -2757,6 +2982,10 @@ for (const r of rails) {
     if (a?.dataset.action === 'control') openControl(true)
     if (a?.dataset.action === 'claude-open') sessionsView.open()
     if (a?.dataset.action === 'claude-new') sessionsView.newChat()
+    if (a?.dataset.action === 'summary-now') writeSummaryNow(a)
+    // a summary row that belongs to a chat opens it
+    const chat = !a ? t.closest<HTMLElement>('.widget[data-id="summary"] [data-sdk]') : null
+    if (chat?.dataset.sdk && !sessionsView.openBySdkId(chat.dataset.sdk)) sessionsView.open()
     if (!a && t.closest('.widget[data-id="agents"] .w-item')) openControl(true)
     const gear = t.closest<HTMLElement>('[data-settings]')
     if (gear) {
@@ -2924,8 +3153,38 @@ const spotlight = createSpotlight({
   },
 })
 
+// commands a project registered (commands.mjs, ~/.laika/commands): 'Playtest: run squad' and the like
+let registered: { id: string; title: string }[] = []
+const loadRegistered = () =>
+  fetch('/api/commands')
+    .then((r) => r.json())
+    .then((j) => (registered = Array.isArray(j.commands) ? j.commands : []))
+    .catch(() => {})
+loadRegistered()
+setInterval(loadRegistered, 60_000)
+const registeredCommands = (): SpotCommand[] =>
+  registered.map((c) => ({
+    id: `cmd-${c.id}`,
+    title: c.title,
+    run: () => {
+      fetch(`/api/commands/${encodeURIComponent(c.id)}/run`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-orbit-command': '1' },
+        body: '{}',
+      }).catch(() => {})
+    },
+  }))
+
 function spotCommands(): SpotCommand[] {
   const cmds: SpotCommand[] = [
+    ...registeredCommands(),
+    // every registered panel, from the panel system itself, so a panel cannot be unreachable:
+    // add one and it is in the palette, on the rail and on a key without touching this list
+    ...panelCommands(),
+    // and what moves them: focus, move, resize, float, fullscreen, layouts (panels.ts)
+    ...windowCommands(),
+    ...workspaceCommands(),
+    ...ruleCommands(),
     { id: 'l-arms', title: 'Layout: ARMS', keys: '1', run: () => setLayout('arms') },
     { id: 'l-rings', title: 'Layout: Rings', keys: '2', run: () => setLayout('rings') },
     { id: 'l-packed', title: 'Layout: Packed', keys: '3', run: () => setLayout('force') },
@@ -2977,6 +3236,13 @@ function spotCommands(): SpotCommand[] {
       run: () => browserDock.open(),
     },
     {
+      id: 'youtube',
+      title: 'Floating YouTube player',
+      keys: 'M',
+      terms: 'music video play song playlist media radio lofi youtube',
+      run: () => youtube.open(),
+    },
+    {
       id: 'sessions',
       title: 'Claude sessions',
       keys: 'S',
@@ -2984,31 +3250,62 @@ function spotCommands(): SpotCommand[] {
       run: () => sessionsView.open(),
     },
     {
-      id: 'control',
-      title: 'Agent control',
-      keys: 'C',
-      terms: 'sessions claude agents waiting repos unpushed mission',
-      run: () => openControl(true),
+      id: 'col-left',
+      title: 'Move column left',
+      keys: '⌥⌘⇧←',
+      terms: 'project spread reorder side workspace',
+      run: () => {
+        if (!sessionsView.moveColumn(-1)) flash('Spread projects side by side first (⌥⌘S)')
+      },
     },
     {
-      id: 'showreel',
-      title: 'Open Showreel Studio',
-      terms: 'film video script voice narration render',
-      run: () => openShowreel(),
+      id: 'col-right',
+      title: 'Move column right',
+      keys: '⌥⌘⇧→',
+      terms: 'project spread reorder side workspace',
+      run: () => {
+        if (!sessionsView.moveColumn(1)) flash('Spread projects side by side first (⌥⌘S)')
+      },
     },
     {
-      id: 'history',
-      title: 'History',
-      keys: 'H',
-      terms: 'timeline what happened today commits memory notes activity chaos log',
-      run: () => historyView.open(),
+      id: 'ring',
+      title: 'Knowledge ring',
+      keys: 'K',
+      terms: 'map graph brain nodes back from browser',
+      run: () => document.querySelector<HTMLElement>('#wbn [data-nav="ring"]')?.click(),
     },
     {
-      id: 'mission',
-      title: 'Mission Control',
-      terms: 'build panel lanes checkpoints verdicts learning chat game studio forge',
-      run: () => openMission(),
+      id: 'broadcast',
+      title: 'Broadcast to chats',
+      keys: '⌥⌘E',
+      terms: 'send message many all chats fleet same prompt',
+      run: () => void sessionsView.broadcast(),
     },
+    {
+      id: 'accounts',
+      title: 'Claude accounts',
+      terms: 'login sign in connect subscription usage limits',
+      run: () => void sessionsView.accounts(),
+    },
+    // developer tools: in the palette only with Settings → App → Developer on (devfeatures.ts)
+    ...(devFeatures()
+      ? [
+          {
+            id: 'showreel',
+            title: 'Open Showreel Studio',
+            keys: 'V',
+            terms: 'reel film video script voice narration render',
+            run: () => openShowreel(),
+          },
+          {
+            id: 'mission',
+            title: 'Mission Control',
+            keys: 'G',
+            terms: 'build panel lanes checkpoints verdicts learning chat game studio forge',
+            run: () => openMission(),
+          },
+        ]
+      : []),
     {
       id: 'brain',
       title: 'Open Brain window',
@@ -3081,7 +3378,7 @@ function spotCommands(): SpotCommand[] {
       title: 'Calendar: month view',
       run: () => {
         try {
-          localStorage.setItem('1brain:cal-view', 'month')
+          localStorage.setItem('orbit:cal-view', 'month')
         } catch {}
         renderOS()
       },
@@ -3091,7 +3388,7 @@ function spotCommands(): SpotCommand[] {
       title: 'Calendar: year view',
       run: () => {
         try {
-          localStorage.setItem('1brain:cal-view', 'year')
+          localStorage.setItem('orbit:cal-view', 'year')
         } catch {}
         renderOS()
       },
@@ -3112,7 +3409,45 @@ function spotCommands(): SpotCommand[] {
       keys: '?',
       run: () => openTool(tools.find((t) => t.id === 'tool-keys') ?? null),
     },
+    // reachable from the header's gear and ⌘, but, until now, not by name
+    {
+      id: 'settings',
+      title: 'Settings',
+      keys: '⌘,',
+      terms: 'preferences theme profile account index layout reset appearance',
+      run: () => openSettings(),
+    },
+    {
+      id: 'library',
+      title: 'Chat library',
+      keys: '⌥⌘O',
+      terms: 'claude chats search pin archive delete transcripts old',
+      hint: 'every Claude chat, to search, pin, archive or delete',
+      run: () => dispatchEvent(new Event('laika:library-open')),
+    },
+    {
+      id: 'away',
+      title: 'Autopilot: go away',
+      terms: 'away mode unattended hours budget goal conductor overnight',
+      hint: 'how long you are away, and what it may spend',
+      run: () => dispatchEvent(new Event('laika:autopilot-away')),
+    },
+    {
+      id: 'kill',
+      title: 'Autopilot: stop the conductor now',
+      keys: '⇧⌥⌘A',
+      terms: 'kill switch halt stop panic emergency',
+      run: () => dispatchEvent(new Event('laika:autopilot-halt')),
+    },
   ]
+  // the adoption pulse is the operator's own view: offered only where its rail button mounted
+  if (document.getElementById('pulse-rail'))
+    cmds.push({
+      id: 'pulse',
+      title: 'Adoption pulse',
+      terms: 'nodes network adoption installs operator',
+      run: () => openPulse(),
+    })
   for (const w of widgets) {
     cmds.push({
       id: `ws-${w.id}`,
@@ -3130,58 +3465,83 @@ function spotCommands(): SpotCommand[] {
 }
 
 // ---------------------------------------------------------------- agent control ----
-// Agents waiting on you, live in the right rail; `c` opens the full view as a drawer.
-const ctlDrawer = document.createElement('div')
-ctlDrawer.id = 'ctl-drawer'
-ctlDrawer.setAttribute('role', 'dialog')
-ctlDrawer.setAttribute('aria-label', 'Agent control')
-document.body.appendChild(ctlDrawer)
+// Agents waiting on you, live in the right rail; `c` opens the full view as a panel in the dock.
 // Claude Code sessions inside the app (s): start or resume one in any repo
 const sessionsView = createSessions()
 // Chromium tabs inside the app (b), one storage profile per account; real tabs need the
 // desktop shell (packages/shell), a plain browser gets the launch note
 const browserDock = createBrowser({ spotlight: () => spotlight.open() })
-// History (h): every session, commit and memory note as moments on one clock. Made before the
-// workbench, whose rail asks it whether it is open the moment it is built.
-const historyView = createHistory({ openControlAt })
-createWorkbench({
-  browser: browserDock,
-  claude: sessionsView,
-  rail: { hidden: railHidden, set: setRail },
-  showreel: { open: openShowreel, close: closeShowreel, isOpen: isShowreelOpen },
-  control: {
-    open: () => openControl(true),
-    close: () => openControl(false),
-    isOpen: () => ctlDrawer.classList.contains('on'),
+// the floating player (m): YouTube music and videos in a window you put wherever you like.
+// Searches and "watch on YouTube" are pages, not embeds, so they go to the browser.
+const youtube = createYouTube({
+  openWeb: (url) => {
+    browserDock.open(true)
+    browserDock.openUrl(url)
   },
-  history: historyView,
-  mission: { open: openMission, close: closeMission, isOpen: isMissionOpen },
 })
-watchMission()
-const control = mountControl(ctlDrawer, {
-  extra: `${canPop() ? `<button class="c-btn ghost c-popout" type="button" title="Pop out to its own window" aria-label="Pop out to its own window">${POP_ICON}</button>` : ''}<button class="c-btn ghost c-close" type="button" title="Close (esc)" aria-label="Close">×</button>`,
-})
-ctlDrawer.addEventListener('click', (e) => {
-  const t = e.target as HTMLElement
-  if (t.closest('.c-close')) openControl(false)
-  if (t.closest('.c-popout')) {
-    openControl(false)
-    popOut('control')
-  }
-})
-/** agent control in its own window: the drawer stays shut and opening it brings that window up */
+// ---------------------------------------------------------------- the panels ----
+/** the rail glyph for agent control: a list with two status dots, the workbench rail's own */
+const CONTROL_ICON =
+  '<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3.2" width="14" height="13.6" rx="2.2"/><circle cx="6.6" cy="7.4" r="1.1" fill="currentColor"/><circle cx="6.6" cy="12.6" r="1.1" fill="currentColor"/><path d="M9.4 7.4h4.4M9.4 12.6h4.4"/></svg>'
+/** sessions waiting on you, kept for the rail badge; refreshAgents() is what counts them */
+let waitingNow = 0
+
+/**
+ * Every window in Orbit that is not the map is a panel, and this is where they are put in.
+ * `registerPanel` brings the rail button, the palette entry, the shortcut, the width, the slide,
+ * the tear-off and the saved layout with it (panels.ts), so nothing below positions itself, opens
+ * itself or draws a frame. A panel a module owns registers itself in that module; the ones here
+ * are the ones whose wiring only main knows.
+ */
+
+/** agent control, the widest panel: sessions, repos, activity and the ports they hold */
+let controlView: { start(): void; stop(): void } | null = null
+let controlHost: HTMLElement | null = null
+/** agent control in its own window: the panel stays shut and opening it brings that window up */
 let controlOut = false
+
+const controlPanel = registerPanel({
+  id: 'control',
+  title: 'Agents',
+  group: 'fleet',
+  key: 'c',
+  icon: CONTROL_ICON,
+  wide: true,
+  width: { min: 520, default: 1040, snaps: [720, 1040, 1320] },
+  terms: 'agent control sessions claude waiting repos unpushed ports activity',
+  hint: 'what needs you: sessions, repos, what is running',
+  mount: (host) => {
+    controlHost = host
+    controlView = mountControl(host, {
+      extra: canPop()
+        ? `<button class="c-btn ghost c-popout" type="button" title="Pop out to its own window" aria-label="Pop out to its own window">${POP_ICON}</button>`
+        : '',
+    })
+    host.addEventListener('click', (e) => {
+      if ((e.target as HTMLElement).closest('.c-popout')) {
+        controlPanel.close()
+        popOut('control')
+      }
+    })
+    return () => controlView?.stop()
+  },
+  // a closed panel doesn't scan repos
+  onVisible: (on) => (on ? controlView?.start() : controlView?.stop()),
+  badge: () => ({ count: waitingNow, tone: 'ok' }),
+})
+
 watchPop('control', (out, was) => {
   controlOut = out
-  if (out) openControl(false)
-  else if (was) openControl(true)
+  if (out) controlPanel.close()
+  else if (was) controlPanel.open()
 })
+
 /** open agent control and bring one session's card into view once it has rendered */
 function openControlAt(id: string) {
   openControl(true)
   let tries = 0
   const find = () => {
-    const card = ctlDrawer.querySelector<HTMLElement>(`[data-id="${CSS.escape(id)}"]`)
+    const card = controlHost?.querySelector<HTMLElement>(`[data-id="${CSS.escape(id)}"]`)
     if (card) {
       card.scrollIntoView({ block: 'center', behavior: 'smooth' })
       card.classList.add('c-flash')
@@ -3192,12 +3552,41 @@ function openControlAt(id: string) {
 }
 function openControl(on: boolean) {
   if (on && controlOut) return popOut('control')
-  const was = ctlDrawer.classList.contains('on')
-  ctlDrawer.classList.toggle('on', on)
-  if (on) control.start()
-  else control.stop() // a closed drawer doesn't scan repos
-  if (was !== on) dispatchEvent(new CustomEvent('laika:control-open', { detail: on }))
+  on ? controlPanel.open() : controlPanel.close()
 }
+
+// the order here is the order on the rail, within each group:
+// fleet — Agents, Autopilot (its four views folded under it), Fleet, Runs
+// know  — History, Data, Users (after the Brain button the rail draws itself)
+// dev   — Profiler, in the developer section at the bottom (after Mission and Reel)
+// autopilot: the chip in the chrome, its five views as panels, and ⌥⌘A / ⇧⌥⌘A
+startAutopilot()
+// the fleet board is the chats' own view of themselves, so sessions.ts registers it
+sessionsView.registerFleetPanel()
+registerRunsPanel()
+registerHistoryPanel({ openControlAt })
+registerDatabasesPanel()
+registerUsersPanel()
+registerProfilerPanel()
+
+createWorkbench({
+  browser: browserDock,
+  claude: sessionsView,
+  rail: { hidden: railHidden, set: setRail },
+  showreel: { open: openShowreel, close: closeShowreel, isOpen: isShowreelOpen },
+  mission: { open: openMission, close: closeMission, isOpen: isMissionOpen },
+  brain: { open: () => openBrainWindow() },
+  music: { open: () => youtube.open(), close: youtube.close, isOpen: youtube.isOpen },
+})
+// the rail exists now: the panels' buttons go into it, and what was open last time comes back
+restorePanels()
+watchMission()
+// turning developer features off takes their windows down with their buttons
+addEventListener('laika:dev-features', (e) => {
+  if ((e as CustomEvent<boolean>).detail) return
+  if (isMissionOpen()) closeMission()
+  if (isShowreelOpen()) closeShowreel()
+})
 const BASE_TITLE = document.title
 const notifySessions = sessionNotifier()
 let agentsJson = ''
@@ -3210,6 +3599,8 @@ async function refreshAgents() {
     notifySessions(list, () => openControl(true))
     const waiting = Number(w.config?.waiting ?? 0)
     document.title = waiting ? `(${waiting}) ${BASE_TITLE}` : BASE_TITLE
+    waitingNow = waiting
+    controlPanel.refreshBadge()
     dispatchEvent(new CustomEvent('laika:waiting', { detail: waiting }))
     const json = JSON.stringify([w.items, w.config?.meta])
     if (json === agentsJson) return
@@ -3225,16 +3616,24 @@ async function refreshAgents() {
     renderOS()
   } catch {}
 }
-refreshAgents()
-setInterval(refreshAgents, 5_000)
+activity.every(5_000, refreshAgents)
 
 addEventListener('keydown', (e) => {
+  // Escape from the page closes the newest thing first: a panel opened beside docked Claude
+  // goes before Claude does. Not from a field, the palette or a window with its own Escape.
+  if (
+    e.key === 'Escape' &&
+    !(e.target as HTMLElement).closest?.(
+      'input, textarea, select, #ss, #sp, #settings, #ql, #bw, #ws, #ytp',
+    ) &&
+    closeTopPanel()
+  )
+    return
   // the sessions view handles its own keys; Escape from outside it (focus on the page) closes it
   if (sessionsView.isOpen()) {
     if (e.key === 'Escape') sessionsView.close()
     return
   }
-  if (e.key === 'Escape' && ctlDrawer.classList.contains('on')) return openControl(false)
   if (e.key === 'Escape') {
     openTool(null)
     if (document.activeElement !== qInput) showPanel(false)
@@ -3257,7 +3656,7 @@ addEventListener('keydown', (e) => {
   // single-key shortcuts never fire while typing somewhere, or over the Brain window
   if (
     (e.target as HTMLElement).closest?.(
-      'input, textarea, select, #bw, #ws, #sp, #settings, #ql, #ctl-drawer, #ss, #wb',
+      'input, textarea, select, #bw, #ws, #sp, #settings, #ql, #ctl-drawer, #ss, #wb, #ytp',
     )
   )
     return
@@ -3282,12 +3681,22 @@ addEventListener('keydown', (e) => {
       return resetView()
     }
     if (e.key === 'i') return openBrainWindow()
-    if (e.key === 'c') return openControl(!ctlDrawer.classList.contains('on'))
-    if (e.key === 'h') {
-      openControl(false)
-      return historyView.open()
-    }
+    // c, h and t belong to the Agents, History and Data panels; panels.ts binds them, with the
+    // same typing guards, so there is one place a panel's key is decided
     if (e.key === 'b') return browserDock.toggle()
+    // Mission and Reel cover the page rather than docking, and the ring is the page itself, so
+    // they stay the workbench's: the key is its rail button, and follows the same rules
+    const nav = (
+      { ...(devFeatures() ? { g: 'mission', v: 'showreel' } : {}), k: 'ring' } as Record<
+        string,
+        string
+      >
+    )[e.key]
+    if (nav) {
+      document.querySelector<HTMLElement>(`#wbn [data-nav="${nav}"]`)?.click()
+      return
+    }
+    if (e.key === 'm') return youtube.toggle()
     if (e.key === ' ' && focusIdx !== null && committed) {
       e.preventDefault() // no page scroll
       return quickLook.toggle(qlItem(focusIdx))
@@ -3341,6 +3750,65 @@ addEventListener('keyup', (e) => {
 // keys released while another window had focus never send a keyup: nothing may stay held
 addEventListener('blur', () => held.clear())
 $('#tool-home').addEventListener('click', () => resetView())
+// the work queue (queue-view.ts) is a panel like the rest: rail, palette, ⌥⌘Q. Not a bare `q`,
+// which is the map's orbit key. The header button opens the same panel and shows the count.
+let queueOpen: Record<string, number> | null = null
+const openItems = (c: Record<string, number>) =>
+  (c.queued ?? 0) + (c.running ?? 0) + (c.blocked ?? 0)
+const queuePanel = registerPanel({
+  id: 'queue',
+  title: 'Queue',
+  group: 'fleet',
+  chord: 'alt+meta+KeyQ',
+  icon: '<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3.4 5h9.2M3.4 10h9.2M3.4 15h6"/><path d="m14.6 12.6 2.4 2.4-2.4 2.4"/></svg>',
+  width: { min: 420, default: 640, snaps: [520, 640, 900] },
+  terms: 'queue work next todo backlog assign items brief fleet dispatch',
+  hint: 'what each chat does next, and what finished',
+  mount: (host) => mountQueue(host),
+  badge: () =>
+    !queueOpen
+      ? 0
+      : queueOpen.needsUser
+        ? { count: openItems(queueOpen), tone: 'err' }
+        : openItems(queueOpen),
+})
+$('#tool-queue').addEventListener('click', () => queuePanel.toggle())
+// the cockpit (cockpit.ts): every chat as a node with its queue under it. The conductor's window
+// shows the same view under its banner; this is it on its own, for when no conductor is open.
+let cockpit: ReturnType<typeof mountCockpit> | null = null
+registerPanel({
+  id: 'cockpit',
+  title: 'Cockpit',
+  group: 'fleet',
+  chord: 'alt+meta+KeyL',
+  icon: '<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.6" y="3" width="4.2" height="4" rx="1.2"/><rect x="7.9" y="3" width="4.2" height="4" rx="1.2"/><rect x="13.2" y="3" width="4.2" height="4" rx="1.2"/><path d="M4.7 9.6v5.6M10 9.6v3M15.3 9.6v6.8"/></svg>',
+  wide: true,
+  width: { min: 480, default: 900, snaps: [720, 900, 1180] },
+  terms: 'cockpit fleet strip lanes chats queue conductor nodes reorder assign',
+  hint: 'every chat as a node, its queue running down beneath it',
+  mount: (host) => {
+    cockpit = mountCockpit(host)
+    return () => {
+      cockpit?.dispose()
+      cockpit = null
+    }
+  },
+  onVisible: (on) => cockpit?.setVisible(on),
+})
+const paintQueue = async () => {
+  const c = await queueCounts()
+  queueOpen = c
+  queuePanel.refreshBadge()
+  const b = $('#tool-queue-n')
+  if (!c) {
+    b.textContent = '--'
+    return
+  }
+  b.textContent = String(openItems(c))
+  b.title = `${c.running ?? 0} running · ${c.ready ?? 0} ready · ${c.needsUser ?? 0} need you`
+  b.style.color = c.needsUser ? 'var(--err)' : ''
+}
+activity.every(20_000, paintQueue)
 
 await load()
 loop()

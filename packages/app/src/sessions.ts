@@ -17,13 +17,36 @@ import './sessions.css'
 import './conductor.css'
 import './session-groups.css'
 import './chat-tint.css'
+import './chat-groups.css'
+import { collapsedGroups, groupRuns, knownGroups, tidyGroup } from './chat-groups.ts'
+import { mountCockpit } from './cockpit.ts'
+import { attachChatMentions, routeFromConductor } from './cockpit-route.ts'
 import { diffHtml } from './diff.ts'
+import { createFleetBoard } from './fleet-board.ts'
+import { type PanelHandle, type Region, registerPanel, registerRegions } from './panels.ts'
+
+/** the rail glyph for the fleet board: rows, each with its status dot */
+const FLEET_ICON =
+  '<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="4.4" cy="5" r="1.3" fill="currentColor"/><circle cx="4.4" cy="10" r="1.3" fill="currentColor"/><circle cx="4.4" cy="15" r="1.3" fill="currentColor"/><path d="M8 5h8.4M8 10h8.4M8 15h5.4"/></svg>'
+
+import * as presence from './activity.ts'
+import {
+  type BgTask,
+  bgShort,
+  bgTip,
+  disposeRunStrip,
+  FLEET_COMMANDS,
+  openBroadcast,
+  paintBackground,
+  paintRunStrip,
+} from './fleet-ui.ts'
 import { createMissionPane, type MissionPane, missionRoots } from './mission.ts'
 import { canPop, POP_ICON, POP_IN_ICON, popOut, watchPop } from './popout.ts'
 import { highlight, renderMarkdown } from './quicklook.ts'
 import { type ChangesView, createChangesView } from './session-changes.ts'
 import { createFilesView, type FilesView } from './session-files.ts'
 import { createTerminalPanel, type TerminalPanel } from './session-terminal.ts'
+import { attachVoice } from './voice.ts'
 
 type Mode = 'default' | 'acceptEdits' | 'plan' | 'auto' | 'bypassPermissions'
 type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
@@ -41,7 +64,7 @@ type Summary = {
   model: string | null
   title: string
   state: 'starting' | 'running' | 'waiting' | 'idle' | 'closed' | 'error'
-  waiting: ('question' | 'permission')[]
+  waiting: ('question' | 'permission' | 'secret')[]
   createdAt: number
   updatedAt: number
   cost: number
@@ -55,11 +78,37 @@ type Summary = {
   /** when away mode ends; null means until switched off */
   autopilotUntil?: number | null
   goal?: string
+  /** opened by this conductor's fleet_spawn */
+  spawnedBy?: string | null
+  /** the conductor's label for a set of chats (fleet_rename), e.g. "Orbit"; null when ungrouped */
+  group?: string | null
 }
 type Suggestion = { chat: string; repo: string; title: string; text: string; why: string }
+/** away mode, as the host keeps it (away.mjs) */
+type AwayState = {
+  on: boolean
+  until: number | null
+  startedAt: number | null
+  endedAt: number | null
+  reason: 'back' | 'expired' | null
+  goal: string
+  conductorId: string | null
+  counts: { approved: number; asked: number; recovered: number }
+  summary: string | null
+  /** chats a conductor parked (fleet_park): closed, resumable with POST /parked/<id>/resume */
+  parked?: { id: string; repo: string; title: string; reason: string; parkedAt: number }[]
+}
 const FROM_CONDUCTOR = '[from the conductor] '
+/** whether the conductor's cockpit is folded, and its height */
+const DECK_KEY = 'laika.cockpit.deck'
 /** the turn in progress: when it began, output tokens so far, what Claude is doing */
-type Work = { start: number; tokens: number; phase: 'thinking' | 'writing' | 'tool' | null }
+type Work = {
+  start: number
+  tokens: number
+  phase: 'thinking' | 'writing' | 'tool' | null
+  /** background tasks and live-progress boards, each with a rough ETA (fleet-work.mjs) */
+  bg?: BgTask[]
+}
 type Ev = { seq: number; at: number; t: string } & Record<string, unknown>
 type Account = {
   id: string
@@ -439,9 +488,25 @@ type Composer = {
   focus(): void
 }
 
+// what you sent from any chat, newest last, so ↑ in a fresh chat still finds your last prompt
+const SENT_KEY = 'laika.sent'
+let sentEverywhere: string[] = []
+try {
+  const got = JSON.parse(localStorage.getItem(SENT_KEY) ?? '[]')
+  if (Array.isArray(got)) sentEverywhere = got.filter((x) => typeof x === 'string')
+} catch {}
+function rememberSent(text: string) {
+  sentEverywhere = [...sentEverywhere.filter((x) => x !== text), text].slice(-100)
+  try {
+    localStorage.setItem(SENT_KEY, JSON.stringify(sentEverywhere))
+  } catch {}
+}
+
 /**
  * The prompt box, shared by a new chat and a running session. Enter sends, ⇧Enter is a new
- * line, ⇧Tab cycles the mode as it does in the CLI; images paste, drop or attach.
+ * line, ⇧Tab cycles the mode as it does in the CLI; images paste, drop or attach. ↑ on the
+ * first line walks back through what you sent (this chat's first, then your other chats),
+ * ↓ on the last line walks forward and back to what you were typing.
  */
 function makeComposer(o: {
   placeholder: string
@@ -451,6 +516,8 @@ function makeComposer(o: {
   onMode: (m: Mode) => void
   onMenu: (kind: 'mode' | 'model' | 'slash' | 'at', anchor: HTMLElement) => void
   model?: string | null
+  /** this chat's own sent messages, oldest first */
+  sent?: () => string[]
 }): Composer {
   const box = el(
     'div',
@@ -515,12 +582,35 @@ function makeComposer(o: {
     modelBtn.title = `Model: ${modelLabel(id)}`
   }
   setModel(o.model ?? null)
+  // ↑/↓ history: -1 is the draft you were typing, 0 the newest sent message
+  let recall = -1
+  let draft = ''
+  const past = () => {
+    const mine = (o.sent?.() ?? []).filter(Boolean).reverse()
+    const rest = sentEverywhere.filter((x) => !mine.includes(x)).reverse()
+    return [...mine, ...rest]
+  }
+  const recallTo = (i: number, up: boolean) => {
+    const list = past()
+    if (i >= list.length) return false
+    if (recall === -1) draft = input.value
+    recall = i
+    input.value = i === -1 ? draft : (list[i] as string)
+    sync()
+    // up lands at the start so another ↑ keeps going; down lands at the end for the same reason
+    const at = up ? 0 : input.value.length
+    input.setSelectionRange(at, at)
+    return true
+  }
   const submit = () => {
     const text = input.value.trim()
     if (busy && !text && !images.length) return o.onStop?.()
     if (!text && !images.length) return
     // clear first: onSend may put the text back (a new chat that still needs its repo)
     const sent = images.splice(0)
+    if (text) rememberSent(text)
+    recall = -1
+    draft = ''
     input.value = ''
     paintThumbs()
     o.onSend(text, sent)
@@ -543,6 +633,23 @@ function makeComposer(o: {
       const next = (MODES[(i + 1) % MODES.length] as (typeof MODES)[number]).id
       setMode(next)
       o.onMode(next)
+    } else if (
+      (e.key === 'ArrowUp' || e.key === 'ArrowDown') &&
+      !e.shiftKey &&
+      !e.altKey &&
+      !e.metaKey &&
+      !e.ctrlKey &&
+      !e.isComposing &&
+      input.selectionStart === input.selectionEnd
+    ) {
+      const caret = input.selectionStart
+      const up = e.key === 'ArrowUp'
+      // only from the first or last line, so ↑/↓ still move through a message you are writing
+      const edge = up
+        ? !input.value.slice(0, caret).includes('\n')
+        : !input.value.slice(caret).includes('\n')
+      if (!edge || (!up && recall === -1)) return
+      if (recallTo(up ? recall + 1 : recall - 1, up)) e.preventDefault()
     }
   })
   input.addEventListener('paste', (e) => {
@@ -589,6 +696,7 @@ function makeComposer(o: {
     }
     if (t === box || t.closest('.cx-thumbs')) input.focus()
   })
+  attachVoice({ box, input, submit, sync })
   setMode(mode)
   sync()
   return {
@@ -612,6 +720,8 @@ function makeComposer(o: {
 type View = {
   s: Summary
   root: HTMLElement
+  /** a conductor's cockpit and @ list (cockpit.ts): let go when the chat ends */
+  cockpit?: () => void
   log: HTMLElement
   tasks: HTMLElement
   composer: Composer
@@ -629,8 +739,18 @@ type View = {
   replayStart: number
   replayTimer: ReturnType<typeof setTimeout> | null
   stickQueued: boolean
+  /** when you last used the wheel, a finger, the scrollbar or a scrolling key in this log */
+  userAt: number
+  /** when we last set scrollTop ourselves, so our own scroll never reads as yours */
+  selfAt: number
+  /** watches the log grow, so following the bottom never depends on counting frames */
+  grow: MutationObserver | null
+  /** watches the log's own box, so resizing the panel keeps the bottom in view */
+  fit: ResizeObserver | null
   /** the latest thinking row, until the next event says how long it took */
   lastThink: { el: HTMLElement; at: number } | null
+  /** away mode's latest refusal: the permission prompt that follows it gets its plain reason */
+  lastAway: Ev | null
   /** Claude's latest text; if a step follows it, it was narration rather than the answer */
   lastText: HTMLElement | null
   /** which host run the events came from; a new one means the host restarted */
@@ -656,6 +776,13 @@ type View = {
   tasksOpen: boolean
   /** the working line's word for this turn, and the token count it has counted up to */
   work: Work & { verb: string; shown: number; seen: number }
+  /** on screen now (presence.watch): a chat nobody can see queues its events and draws nothing */
+  shown: boolean
+  unwatch: (() => void) | null
+  /** in the background, events are drawn once a second rather than as they come */
+  awayTimer: ReturnType<typeof setTimeout> | null
+  /** off screen long enough, the view gives its log back (see release) */
+  releaseTimer: ReturnType<typeof setTimeout> | null
 }
 
 /** a VS Code-style editor group: a tab bar and the chat it shows */
@@ -717,9 +844,12 @@ type SavedWs = {
   grid?: boolean
   rows?: number[]
 }
-const MAX_GROUPS = 4
-/** project folders side by side on one screen */
-const MAX_SPREAD = 4
+/**
+ * No cap on groups or project columns. Past what fits, a group keeps this much width (and, in a
+ * grid, height) and the row scrolls: 200 is about what two groups get in the docked panel today.
+ */
+const MIN_GROUP_W = 200
+const MIN_GROUP_H = 180
 const FULL_KEY = 'laika.claudeFull'
 
 // distinct, readable on the dark ground; a repo keeps its colour because it comes from its name
@@ -759,6 +889,33 @@ const LAYOUT_KEY = 'laika.workspaces'
 const WS_KEY = 'laika.wsGroups'
 const NAMES_KEY = 'laika.chatNames'
 const COLOURS_KEY = 'laika.chatColours'
+/** set once this browser has handed its names and colours to the chat library */
+const MIGRATED_KEY = 'laika.chatLibraryMigrated'
+const LIBRARY = '/api/control/library'
+/** what the chat library keeps about a chat (chat-library.mjs) */
+type LibEntry = { title?: string; pinned?: boolean; archived?: boolean; colour?: string }
+/** a chat as the library lists it: every transcript on this machine, not only recent ones */
+type LibItem = {
+  id: string
+  account: string | null
+  project: string
+  cwd: string | null
+  branch: string | null
+  autoTitle: string
+  started: string
+  updated: string
+  repo: string
+  repoPath: string | null
+  title: string
+  named: boolean
+  pinned: boolean
+  archived: boolean
+  colour: string | null
+  /** the host's chat id when it is open in this app */
+  here: string | null
+  /** set by a search inside messages: the words around the match */
+  snippet?: { text: string; start: number; length: number }
+}
 const STATIC_KEY = 'laika.panelStatic'
 const DOCK_KEY = 'laika.dockWidth'
 
@@ -798,6 +955,14 @@ const ICON = {
   even: svg('<path d="M2 8h12M5 5 2 8l3 3M11 5l3 3-3 3"/>', 13, 13),
   past: svg('<path d="M2.5 8a5.5 5.5 0 1 0 1.6-3.9M2.5 2.8v2.6h2.6M8 5v3.2l2 1.3"/>', 13, 13),
   here: svg('<path d="M2.5 8h9M8 4.5 11.5 8 8 11.5M14 3v10"/>', 13, 13),
+  pin: svg('<path d="M6 2.5h4l-.6 4 2.1 2.2H4.5L6.6 6.5zM8 8.7v4.8"/>', 12, 12),
+  rename: svg('<path d="M10.5 2.8 13.2 5.5 6 12.7l-3.2.5.5-3.2zM9 4.3l2.7 2.7"/>', 12, 12),
+  archive: svg(
+    '<rect x="2" y="3" width="12" height="3" rx=".8"/><path d="M3 6v6.5a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V6M6.5 8.8h3"/>',
+    12,
+    12,
+  ),
+  trash: svg('<path d="M2.5 4.5h11M6.5 4.5V3h3v1.5M4 4.5l.7 9h6.6l.7-9M6.8 7v4M9.2 7v4"/>', 12, 12),
 }
 
 /** `popped`: this is the panel in its own pop-out window (pop.html), not the dock */
@@ -822,10 +987,17 @@ export function createSessions(opts: { popped?: boolean } = {}) {
           <button type="button" class="ss-ic" data-view="term" title="Terminal (⌃\`)" aria-label="Terminal">${ICON.term}</button>
           <i class="ss-vsep"></i>
         </span>
+        <button type="button" class="ss-ic" data-act="fleet" title="Fleet board: every chat on one line (⌥⌘B)" aria-label="Fleet board">
+          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" d="M2.5 4h1M6 4h7.5M2.5 8h1M6 8h7.5M2.5 12h1M6 12h7.5"/></svg><b data-el="fleetn" hidden></b>
+        </button>
+        <button type="button" class="ss-ic bc-open" data-act="broadcast" title="Broadcast: one message to several chats (⌥⌘E)" aria-label="Broadcast to chats">
+          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" d="M2.5 6.2h2.3L10 3v10L4.8 9.8H2.5z"/><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" d="M12.3 6a2.6 2.6 0 0 1 0 4M5.2 9.8l.9 3.2"/></svg>
+        </button>
+        <button type="button" class="ss-away-btn" data-act="away" data-el="awaybtn" title="I’m away: keep the chats going (⌥⌘A)"><span class="aw-moon" aria-hidden="true">☾</span><span data-el="awaylbl">I’m away</span></button>
         <button type="button" class="ss-ic" data-act="accounts" title="Claude accounts" aria-label="Claude accounts">
           <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="8" cy="5.5" r="2.6" fill="none" stroke="currentColor" stroke-width="1.4"/><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" d="M3 13.5c.6-2.4 2.6-3.6 5-3.6s4.4 1.2 5 3.6"/></svg><b class="ss-acct-warn" data-el="acctwarn" hidden>!</b>
         </button>
-        <button type="button" class="ss-ic" data-act="history" title="All Claude sessions" aria-label="All Claude sessions">
+        <button type="button" class="ss-ic" data-act="history" title="Chat library: every Claude chat (⌥⌘O)" aria-label="Chat library">
           <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.4" d="M2.5 8a5.5 5.5 0 1 0 1.6-3.9M2.5 2.8v2.6h2.6M8 5v3.2l2 1.3"/></svg><span class="ss-caret">▾</span>
         </button>
         <button type="button" class="ss-ic" data-act="popout" data-el="popout" title="Pop out to its own window" aria-label="Pop out to its own window" hidden>${POP_ICON}</button>
@@ -833,6 +1005,7 @@ export function createSessions(opts: { popped?: boolean } = {}) {
         <button type="button" class="ss-ic" data-act="close" title="Close (esc)" aria-label="Close"><span class="ss-ic-t">×</span></button>
       </span>
     </header>
+    <div class="ss-away" data-el="away" role="status" hidden></div>
     <div class="ss-history" data-el="history" hidden></div>
     <div class="ss-pane" data-el="pane"></div>
     <div class="ss-grip" data-el="grip" title="Drag to resize · double-click for the default width"></div>`
@@ -896,6 +1069,313 @@ export function createSessions(opts: { popped?: boolean } = {}) {
     })
   }
 
+  // ------------------------------------------------------------ away mode
+  /**
+   * "I'm away": one switch that puts the conductor on autopilot, lets the host approve the plainly
+   * safe permission prompts and recover stuck chats, until the time is up or you are back. The
+   * host keeps the state (away.mjs); the page shows it above every workspace.
+   */
+  let awayState: AwayState | null = null
+  const AWAY_SEEN = 'laika.away.seen'
+  const AWAY_HOURS = 'laika.away.hours'
+  const awayLeft = (ms: number) => {
+    const m = Math.max(0, Math.ceil(ms / 60_000))
+    return m >= 60 ? `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m` : `${m}m`
+  }
+  const awayClock = (t: number) =>
+    new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+
+  async function refreshAway() {
+    const r = await fetch(`${API}/away`, { signal: AbortSignal.timeout(10_000) })
+      .then((x) => (x.ok ? x.json() : null))
+      .catch(() => null)
+    if (r && typeof r.on === 'boolean') {
+      awayState = r as AwayState
+      paintAway()
+    }
+  }
+
+  function paintAway() {
+    const a = awayState
+    const bar = $('away')
+    const btn = $('awaybtn')
+    const on = !!a?.on
+    btn.classList.toggle('on', on)
+    btn.setAttribute('aria-pressed', String(on))
+    $('awaylbl').textContent =
+      on && a?.until ? `Away · ${awayLeft(a.until - Date.now())}` : 'I’m away'
+    btn.title = on
+      ? 'Away mode is on: the chats keep going (⌥⌘A to come back)'
+      : 'I’m away: keep the chats going (⌥⌘A)'
+    if (!a) {
+      bar.hidden = true
+      return
+    }
+    const lead = a.conductorId ? summaryOf(a.conductorId) : undefined
+    if (on) {
+      bar.hidden = false
+      bar.className = 'ss-away on'
+      bar.innerHTML = `<span class="cd-pulse" aria-hidden="true"></span>
+        <div class="aw-what"><b>Away${a.until ? ` · ${esc(awayLeft(a.until - Date.now()))} left` : ''}</b><span title="${esc(a.goal)}">${a.until ? `until ${esc(awayClock(a.until))} · ` : ''}${esc(a.goal)}</span></div>
+        <span class="aw-acts"><button type="button" data-aw="allowed" title="What runs without you while away">Allowed</button>${lead ? '<button type="button" data-aw="lead">♛ Conductor</button>' : ''}<button type="button" class="aw-go" data-aw="back">I’m back</button></span>`
+      return
+    }
+    let seen = ''
+    try {
+      seen = localStorage.getItem(AWAY_SEEN) ?? ''
+    } catch {}
+    // back: what happened, until you close it
+    if (a.endedAt && String(a.endedAt) !== seen && Date.now() - a.endedAt < 12 * 3_600_000) {
+      bar.hidden = false
+      bar.className = 'ss-away back'
+      bar.innerHTML = `<span class="aw-sun" aria-hidden="true">☀</span>
+        <div class="aw-what"><b>${a.reason === 'expired' ? 'Away time is up' : 'Welcome back'}</b><span>${esc(a.summary ?? '')}</span></div>
+        <span class="aw-acts">${lead ? '<button type="button" class="aw-go" data-aw="lead">♛ Read the summary</button>' : ''}${(
+          a.parked ?? []
+        )
+          .slice(-3)
+          .map(
+            (p) =>
+              `<button type="button" data-aw="unpark" data-id="${esc(p.id)}" title="${esc(`Parked: ${p.title || p.repo}${p.reason ? ` · ${p.reason}` : ''}`)}">Resume ${esc(p.repo)}</button>`,
+          )
+          .join(
+            '',
+          )}<button type="button" data-aw="seen" title="Dismiss" aria-label="Dismiss">×</button></span>`
+      return
+    }
+    bar.hidden = true
+  }
+
+  /** the conductor chat away mode runs, where its summary lands */
+  function openAwayLead() {
+    const s = awayState?.conductorId ? summaryOf(awayState.conductorId) : undefined
+    if (!s) return
+    const ws = ensureWs(wsKey(s.cwd))
+    setWs(ws.path)
+    showChat(ws, s.id)
+  }
+
+  function awayDialog() {
+    if (root.querySelector('.aw-dlg')) return
+    let hours = 2
+    try {
+      hours = Number(localStorage.getItem(AWAY_HOURS)) || 2
+    } catch {}
+    const lead = summaries.find((s) => s.role === 'conductor')
+    const box = el('div', 'ss-ask-dlg aw-dlg')
+    box.setAttribute('role', 'dialog')
+    box.setAttribute('aria-label', 'I’m away')
+    const preset = [1, 2, 4, 8]
+    box.innerHTML = `<div class="dlg">
+      <b>☾ I’m away</b>
+      <p>Your chats keep going without you. ${lead ? 'Your conductor' : 'A conductor chat'} leads them; reading, editing and running checks inside each repo are approved for you; stuck chats are restarted. Anything risky still waits for you. <button type="button" class="aw-link" data-aw-allowed>See what’s allowed</button></p>
+      <div class="aw-durs" role="radiogroup" aria-label="For how long">
+        ${preset.map((h) => `<button type="button" role="radio" data-h="${h}" aria-checked="${h === hours}">${h}h</button>`).join('')}
+        <label class="aw-custom"><input class="dlg-in" data-aw-in="custom" type="number" min="0.25" max="24" step="0.25" value="${preset.includes(hours) ? '' : hours}" placeholder="Custom" aria-label="Custom hours" /><span>hours</span></label>
+      </div>
+      <input class="dlg-in" data-aw-in="goal" maxlength="2000" placeholder="${esc(lead?.goal ? `Goal: ${lead.goal}` : 'Goal (optional): keep every open chat moving on its current task')}" aria-label="Goal while you are away" />
+      <p class="ss-err" hidden></p>
+      <div class="dlg-acts">
+        <button type="button" class="ac-btn" data-dlg="no">Cancel</button>
+        <button type="button" class="ac-btn go" data-dlg="yes">Start away mode</button>
+      </div>
+    </div>`
+    const custom = box.querySelector('[data-aw-in="custom"]') as HTMLInputElement
+    const goal = box.querySelector('[data-aw-in="goal"]') as HTMLInputElement
+    const err = box.querySelector('.ss-err') as HTMLElement
+    const pick = (h: number | null) => {
+      for (const b of box.querySelectorAll<HTMLElement>('[data-h]'))
+        b.setAttribute('aria-checked', String(Number(b.dataset.h) === h))
+    }
+    if (!preset.includes(hours)) pick(null)
+    custom.addEventListener('input', () => pick(custom.value ? null : 2))
+    const go = async () => {
+      const chosen = box.querySelector<HTMLElement>('[data-h][aria-checked="true"]')
+      const h = custom.value ? Number(custom.value) : Number(chosen?.dataset.h ?? 2)
+      if (!(h > 0 && h <= 24)) {
+        err.hidden = false
+        err.textContent = 'Choose between 15 minutes and 24 hours'
+        return
+      }
+      const yes = box.querySelector('[data-dlg="yes"]') as HTMLButtonElement
+      yes.disabled = true
+      const ws = activeWs ? workspaces.get(activeWs) : undefined
+      const r = await post('/away', {
+        on: true,
+        minutes: Math.round(h * 60),
+        goal: goal.value.trim(),
+        // a conductor is started here if there is none
+        ...(ws ? { cwd: ws.where } : {}),
+      }).catch(() => null)
+      const body = await r?.json().catch(() => null)
+      if (!r?.ok) {
+        yes.disabled = false
+        err.hidden = false
+        err.textContent = body?.error ?? 'The Claude host did not answer'
+        return
+      }
+      try {
+        localStorage.setItem(AWAY_HOURS, String(h))
+      } catch {}
+      awayState = body as AwayState
+      box.remove()
+      await refresh()
+      paintAway()
+    }
+    box.addEventListener('click', (e) => {
+      const t = e.target as HTMLElement
+      const h = t.closest<HTMLElement>('[data-h]')
+      if (h) {
+        custom.value = ''
+        return pick(Number(h.dataset.h))
+      }
+      if (t.closest('[data-aw-allowed]')) return awayAllowed()
+      const d = t.closest<HTMLElement>('[data-dlg]')?.dataset.dlg
+      if (d === 'yes') go()
+      else if (d === 'no' || e.target === box) box.remove()
+    })
+    box.addEventListener('keydown', (e) => {
+      e.stopPropagation()
+      if (e.key === 'Escape') box.remove()
+      if (
+        e.key === 'Enter' &&
+        !(e.target as HTMLElement).closest('[data-dlg="no"],[data-aw-allowed]')
+      )
+        go()
+    })
+    root.appendChild(box)
+    ;(box.querySelector('[data-h][aria-checked="true"]') as HTMLElement | null)?.focus()
+  }
+
+  /**
+   * "Allowed while away": the shell patterns you always-allowed (each with a remove button), what
+   * your policy file takes out, and the built-in defaults, read-only and folded away.
+   */
+  async function awayAllowed() {
+    if (root.querySelector('.aw-allowed')) return
+    type Lists = { read: string[]; write: string[]; bash: string[] }
+    const box = el('div', 'ss-ask-dlg aw-allowed')
+    box.setAttribute('role', 'dialog')
+    box.setAttribute('aria-label', 'Allowed while away')
+    const code = (x: string) => `<code>${esc(x)}</code>`
+    const paint = (p: { defaults: Lists; additions: Lists; removed: Lists } | null, error = '') => {
+      const added = p?.additions.bash ?? []
+      const gone = p?.removed.bash ?? []
+      const builtIn = (p?.defaults.bash ?? []).filter((x) => !gone.includes(x))
+      box.innerHTML = `<div class="dlg">
+        <b>☾ Allowed while away</b>
+        <p>Shell commands that run without you while you are away, as the words they start with.</p>
+        ${
+          !p
+            ? `<p class="ss-err">${esc(error || 'Loading…')}</p>`
+            : `<h4>You allowed</h4>
+        ${
+          added.length
+            ? `<ul class="aw-pats">${added.map((x) => `<li>${code(x)}<button type="button" data-aw-rm="${esc(x)}" title="Stop allowing this" aria-label="Stop allowing ${esc(x)}">×</button></li>`).join('')}</ul>`
+            : '<p class="aw-none">Nothing yet: use “Always allow” on a permission away mode left for you.</p>'
+        }
+        ${gone.length ? `<h4>Built in, taken out by your policy file</h4><p class="aw-codes">${gone.map(code).join(' ')}</p>` : ''}
+        <details class="aw-defaults"><summary>Built in (${p.defaults.bash.length})</summary><p class="aw-codes">${builtIn.map(code).join(' ')}</p></details>
+        ${error ? `<p class="ss-err">${esc(error)}</p>` : ''}`
+        }
+        <div class="dlg-acts"><button type="button" class="ac-btn" data-dlg="no">Close</button></div>
+      </div>`
+    }
+    const load = async (error = '') => {
+      const r = await fetch(`${API}/away/policy`, { signal: AbortSignal.timeout(10_000) })
+        .then((x) => (x.ok ? x.json() : null))
+        .catch(() => null)
+      paint(r?.additions ? r : null, r ? error : 'The Claude host did not answer')
+    }
+    box.addEventListener('click', async (e) => {
+      const t = e.target as HTMLElement
+      const rm = t.closest<HTMLButtonElement>('[data-aw-rm]')
+      if (rm) {
+        rm.disabled = true
+        const r = await post('/away/policy/remove', { pattern: rm.dataset.awRm }).catch(() => null)
+        const body = await r?.json().catch(() => null)
+        return load(r?.ok ? '' : (body?.error ?? 'The Claude host did not answer'))
+      }
+      if (t.closest('[data-dlg="no"]') || e.target === box) box.remove()
+    })
+    box.addEventListener('keydown', (e) => {
+      e.stopPropagation()
+      if (e.key === 'Escape') box.remove()
+    })
+    paint(null)
+    root.appendChild(box)
+    box.querySelector<HTMLElement>('[data-dlg="no"]')?.focus()
+    await load()
+    box.querySelector<HTMLElement>('[data-aw-rm], [data-dlg="no"]')?.focus()
+  }
+
+  async function awayBack() {
+    const r = await post('/away', { on: false })
+      .then((x) => (x.ok ? x.json() : null))
+      .catch(() => null)
+    if (r && typeof r.on === 'boolean') awayState = r as AwayState
+    paintAway()
+    // the conductor writes its summary of the time away in its own chat
+    openAwayLead()
+  }
+
+  /** a parked chat (fleet_park) back where it left off, from the away bar */
+  async function unparkChat(id: string) {
+    if (!id) return
+    const r = await post(`/parked/${encodeURIComponent(id)}/resume`).catch(() => null)
+    const body = await r?.json().catch(() => null)
+    if (!r?.ok) {
+      await ask({
+        title: 'Could not resume that chat',
+        body: body?.error ?? 'The Claude host did not answer',
+        ok: 'OK',
+        cancel: null,
+      })
+      return
+    }
+    await refresh()
+    await refreshAway()
+    const s = summaryOf(body.id)
+    if (s) {
+      const ws = ensureWs(wsKey(s.cwd))
+      setWs(ws.path)
+      showChat(ws, s.id)
+    }
+  }
+
+  /**
+   * The dock's away button and ⌥⌘A: autopilot's own control (autopilot-panels.ts) owns all three
+   * modes now, so this opens it rather than asking a second time in a second place. Coming back
+   * is still here, because "I'm back" is this panel's word for it and the conductor's summary
+   * lands in this panel.
+   */
+  async function toggleAway() {
+    if (!awayState?.on) return dispatchEvent(new CustomEvent('laika:autopilot-toggle'))
+    const yes = await ask({
+      title: 'I’m back?',
+      body: 'Away mode ends: autopilot stops, nothing more is approved for you, and the conductor writes up what happened.',
+      ok: 'I’m back',
+    })
+    if (yes) awayBack()
+  }
+
+  $('away').addEventListener('click', (e) => {
+    const k = (e.target as HTMLElement).closest<HTMLElement>('[data-aw]')?.dataset.aw
+    if (k === 'lead') return openAwayLead()
+    if (k === 'back') return awayBack()
+    if (k === 'allowed') return awayAllowed()
+    if (k === 'unpark')
+      return unparkChat(
+        (e.target as HTMLElement).closest<HTMLElement>('[data-id]')?.dataset.id ?? '',
+      )
+    if (k === 'seen') {
+      try {
+        localStorage.setItem(AWAY_SEEN, String(awayState?.endedAt ?? ''))
+      } catch {}
+      paintAway()
+    }
+  })
+
   // a launcher on the map, so Claude is findable without knowing a shortcut
   const launch = el(
     'button',
@@ -935,7 +1415,7 @@ export function createSessions(opts: { popped?: boolean } = {}) {
   let spread: string[] = []
   let spreadSizes: number[] = []
   const visible = (path: string) => (spread.length ? spread.includes(path) : path === activeWs)
-  let timer: ReturnType<typeof setInterval> | null = null
+  let timer: (() => void) | null = null
   let restored = false
   const prefs: { account: string; mode: Mode; model: string; effort: Effort } = {
     account: '',
@@ -1119,6 +1599,7 @@ export function createSessions(opts: { popped?: boolean } = {}) {
     return refreshing
   }
   async function refreshNow() {
+    refreshAway()
     try {
       const [s, e] = await Promise.all([
         fetch(`${API}/sessions`, { signal: AbortSignal.timeout(10_000) }).then((r) => r.json()),
@@ -1160,6 +1641,8 @@ export function createSessions(opts: { popped?: boolean } = {}) {
     const badge = launch.querySelector('[data-need]') as HTMLElement
     badge.hidden = !need
     badge.textContent = String(need)
+    $('fleetn').hidden = !need
+    $('fleetn').textContent = String(need)
     launch.classList.toggle('need', need > 0)
   }
 
@@ -1184,7 +1667,90 @@ export function createSessions(opts: { popped?: boolean } = {}) {
     const size = $('size')
     size.title = docked ? 'Full Claude (⌥⌘F)' : 'Dock beside the map (⌥⌘F)'
     ;(size.firstElementChild as HTMLElement).textContent = docked ? '⤢' : '⇥'
+    announceWorkspaces()
   }
+
+  /**
+   * The project tabs are the window system's workspaces (panels.ts): it hears which there are
+   * and which are on screen, and asks for one by its key. Said only when something changed.
+   */
+  let wsSaid = ''
+  function announceWorkspaces() {
+    const list = order
+      .map((p) => workspaces.get(p))
+      .filter((w): w is Workspace => !!w)
+      .map((w) => ({ key: w.path, name: w.name, colour: w.colour }))
+    const detail = { list, shown: order.filter(visible) }
+    const said = JSON.stringify(detail)
+    if (said === wsSaid) return
+    wsSaid = said
+    dispatchEvent(new CustomEvent('laika:workspaces', { detail }))
+  }
+  /**
+   * The chat groups are windows too. The window keys (panels.ts) move focus between them, the
+   * next project column and the panels by where they are on screen, and act on the group the
+   * keyboard is in: ⌥⌘⇧←/→ moves its chat into the group beside (past the last group, the whole
+   * column moves across the spread), ⌥⌘-/= resizes it, ⌥⌘↩ is full Claude, ⌥⌘W closes the
+   * group (its chats keep running, in the group beside). Nothing here ends a chat.
+   */
+  registerRegions(() => {
+    if (!open) return []
+    const out: Region[] = []
+    for (const path of order.filter(visible)) {
+      const ws = workspaces.get(path)
+      if (!ws || ws.pane !== 'chats') continue
+      const cells = [...ws.cols.querySelectorAll<HTMLElement>('.ws-col')]
+      ws.groups.forEach((g, gi) => {
+        const el = cells[gi]
+        if (!el) return
+        out.push({
+          id: `${path}#${g.id}`,
+          el,
+          current: path === activeWs && gi === ws.focus,
+          focus: () => {
+            focusSide(path)
+            focusGroup(ws, gi)
+          },
+          move: (dir) => {
+            if (dir !== 'left' && dir !== 'right') return false
+            const d = dir === 'right' ? 1 : -1
+            if ((gi + d < 0 || gi + d >= ws.groups.length) && spread.length > 1) {
+              shiftSide(path, d)
+              return true
+            }
+            const id = ws.groups[gi]?.active
+            if (!id || id === 'new') return false
+            moveSideways(ws, id, d)
+            focusInput(ws)
+            return true
+          },
+          resize: (by, axis) => {
+            if (axis !== 'x' || ws.groups.length < 2 || isGrid(ws)) return false
+            const k = by > 0 ? 1.15 : 1 / 1.15
+            ws.sizes[gi] = Math.max(0.25, Math.min(4, (ws.sizes[gi] ?? 1) * k))
+            layoutCols(ws)
+            saveWs(ws)
+            return true
+          },
+          full: () => {
+            setDocked(!docked)
+            return true
+          },
+          close: () => {
+            if (ws.groups.length < 2) return false
+            closeGroup(ws, gi)
+            focusInput(ws)
+            return true
+          },
+        })
+      })
+    }
+    return out
+  })
+  addEventListener('laika:workspace-go', (e) => {
+    const key = (e as CustomEvent<{ key?: string }>).detail?.key
+    if (key && workspaces.has(key) && key !== activeWs) setWs(key)
+  })
 
   // right-click a repo tab: side by side, swap, alone, close
   const tmenu = el('div', 'ss-menu ws-cmenu')
@@ -1193,28 +1759,26 @@ export function createSessions(opts: { popped?: boolean } = {}) {
   document.body.appendChild(tmenu)
   $('tabs').addEventListener('contextmenu', (e) => {
     const path = (e.target as HTMLElement).closest<HTMLElement>('.ws-tab')?.dataset.wsOpen
-    const ws = path ? workspaces.get(path) : undefined
-    if (!path || !ws) return
+    if (!path || !workspaces.has(path)) return
     e.preventDefault()
+    tabMenu(path, e.clientX, e.clientY)
+  })
+  /** a folder's menu: from its tab, or from its column's name bar when side by side */
+  function tabMenu(path: string, x: number, y: number) {
+    const ws = workspaces.get(path)
+    if (!ws) return
     const item = (k: string, label: string, hint = '', off = false) =>
       `<button type="button" role="menuitem" data-tm="${k}"${off ? ' disabled' : ''}><span>${label}</span>${hint ? `<kbd>${hint}</kbd>` : ''}</button>`
     const onScreen = visible(path)
     tmenu.innerHTML = [
       `<div class="cm-h"><i class="ws-st" style="border-color:${ws.colour}"></i><span>${esc(ws.name)}</span></div>`,
-      !onScreen
-        ? item(
-            'beside',
-            spread.length >= MAX_SPREAD ? 'Open beside (in place of the last)' : 'Open beside',
-            'drag down',
-            !activeWs,
-          )
-        : '',
-      spread.length && onScreen ? item('left', 'Move left', '', spread[0] === path) : '',
+      !onScreen ? item('beside', 'Open beside', 'drag down', !activeWs) : '',
+      spread.length && onScreen ? item('left', 'Move left', '⌥⌘⇧←', spread[0] === path) : '',
       spread.length && onScreen
-        ? item('right', 'Move right', '', spread[spread.length - 1] === path)
+        ? item('right', 'Move right', '⌥⌘⇧→', spread[spread.length - 1] === path)
         : '',
-      spread.length && onScreen ? item('alone', 'Show only this') : '',
-      spread.length && onScreen ? item('off', 'Take off the screen') : '',
+      spread.length && onScreen ? item('alone', 'Show only this', 'double-click') : '',
+      spread.length && onScreen ? item('off', 'Take off the screen', '×') : '',
       order.length > 1 ? item('spread', 'Spread tabs across the screen', '⌥⌘S') : '',
       '<hr>',
       '<hr>',
@@ -1229,12 +1793,23 @@ export function createSessions(opts: { popped?: boolean } = {}) {
     ].join('')
     tmenu.dataset.path = path
     tmenu.hidden = false
-    tmenu.style.left = `${Math.min(e.clientX, innerWidth - tmenu.offsetWidth - 8)}px`
-    tmenu.style.top = `${Math.min(e.clientY, innerHeight - tmenu.offsetHeight - 8)}px`
-  })
+    tmenu.style.left = `${Math.min(x, innerWidth - tmenu.offsetWidth - 8)}px`
+    tmenu.style.top = `${Math.min(y, innerHeight - tmenu.offsetHeight - 8)}px`
+  }
   addEventListener('pointerdown', (e) => {
     if (!tmenu.hidden && !tmenu.contains(e.target as Node)) tmenu.hidden = true
   })
+  // Escape closes the menu, not the panel under it
+  addEventListener(
+    'keydown',
+    (e) => {
+      if (e.key !== 'Escape' || tmenu.hidden) return
+      e.preventDefault()
+      e.stopPropagation()
+      tmenu.hidden = true
+    },
+    true,
+  )
   tmenu.addEventListener('click', (e) => {
     const k = (e.target as HTMLElement).closest<HTMLElement>('[data-tm]')?.dataset.tm
     const path = tmenu.dataset.path as string
@@ -1366,9 +1941,65 @@ export function createSessions(opts: { popped?: boolean } = {}) {
   function setChatColour(s: Summary, hex: string | null) {
     if (hex) chatColours.set(nameKey(s), hex)
     else chatColours.delete(nameKey(s))
+    saveNamesLocally()
+    if (s.sdkSessionId) patchLibrary(s.sdkSessionId, { colour: hex ?? '' })
+  }
+  const saveNamesLocally = () => {
     try {
+      localStorage.setItem(NAMES_KEY, JSON.stringify(Object.fromEntries(names)))
       localStorage.setItem(COLOURS_KEY, JSON.stringify(Object.fromEntries(chatColours)))
     } catch {}
+  }
+  /**
+   * Names and colours also live in the chat library on disk (chat-library.mjs), so they follow a
+   * chat into the pop-out window and other browsers. localStorage stays as the copy drawn before
+   * the library answers. The first time a browser sees the library it hands over what it kept.
+   */
+  const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+  function patchLibrary(id: string, patch: LibEntry) {
+    return fetch(`${LIBRARY}/meta`, {
+      method: 'POST',
+      headers: WRITE,
+      body: JSON.stringify({ id, patch }),
+      signal: AbortSignal.timeout(10_000),
+    })
+      .then((r) => r.ok)
+      .catch(() => false)
+  }
+  async function syncLibrary() {
+    let migrated = false
+    try {
+      migrated = localStorage.getItem(MIGRATED_KEY) === '1'
+    } catch {}
+    const mine = (m: Map<string, string>) =>
+      Object.fromEntries([...m].filter(([k]) => SESSION_ID.test(k)))
+    const lib: Record<string, LibEntry> | null = await (migrated
+      ? fetch(`${LIBRARY}/meta`, { signal: AbortSignal.timeout(10_000) })
+      : fetch(`${LIBRARY}/meta`, {
+          method: 'POST',
+          headers: WRITE,
+          body: JSON.stringify({ migrate: { names: mine(names), colours: mine(chatColours) } }),
+          signal: AbortSignal.timeout(10_000),
+        })
+    )
+      .then((r) => (r.ok ? r.json() : null))
+      .catch(() => null)
+    if (!lib) return
+    try {
+      localStorage.setItem(MIGRATED_KEY, '1')
+    } catch {}
+    // the library is the truth for every Claude session; names kept under a host id stay local
+    for (const k of [...names.keys()]) if (SESSION_ID.test(k) && !lib[k]?.title) names.delete(k)
+    for (const k of [...chatColours.keys()])
+      if (SESSION_ID.test(k) && !lib[k]?.colour) chatColours.delete(k)
+    for (const [k, e] of Object.entries(lib)) {
+      if (e.title) names.set(k, e.title)
+      if (e.colour) chatColours.set(k, e.colour)
+    }
+    saveNamesLocally()
+    paintTabs()
+    const ws = activeWs ? workspaces.get(activeWs) : undefined
+    if (ws) paintWsBar(ws)
   }
   /** each Claude account keeps one colour and a short label everywhere it shows */
   const ACCOUNT_COLOURS = ['#7aa2ff', '#ff7eb6', '#5ee0c1', '#ffc94f', '#c792ea', '#f7a26c']
@@ -1390,9 +2021,8 @@ export function createSessions(opts: { popped?: boolean } = {}) {
     const t = to.trim().slice(0, 120)
     if (t && t !== s.title) names.set(nameKey(s), t)
     else names.delete(nameKey(s))
-    try {
-      localStorage.setItem(NAMES_KEY, JSON.stringify(Object.fromEntries(names)))
-    } catch {}
+    saveNamesLocally()
+    if (s.sdkSessionId) patchLibrary(s.sdkSessionId, { title: names.get(nameKey(s)) ?? '' })
   }
   /** chats that finished while they were not on screen */
   const unread = new Set<string>()
@@ -1541,6 +2171,7 @@ export function createSessions(opts: { popped?: boolean } = {}) {
     const w = el('section', 'ws')
     w.style.setProperty('--ws', colour)
     w.innerHTML = `
+      <div class="ws-head" data-w="head"><span></span><button type="button" class="ws-head-x" data-w="off" title="Take off the screen (its chats keep running)" aria-label="Take ${esc(name)} off the screen">×</button></div>
       <div class="ws-cols" data-w="cols"></div>
       <div class="ws-files" data-w="files" hidden></div>
       <div class="ws-changes" data-w="changes" hidden></div>
@@ -1578,7 +2209,7 @@ export function createSessions(opts: { popped?: boolean } = {}) {
       built: false,
     }
     // saved groups hold chat ids; placeChats drops the ones that are gone once chats load
-    for (const g of (saved?.groups ?? []).slice(0, MAX_GROUPS)) {
+    for (const g of saved?.groups ?? []) {
       const tabs = g.tabs.filter((t) => typeof t === 'string' && t !== 'new')
       if (tabs.length)
         ws.groups.push({
@@ -1586,8 +2217,8 @@ export function createSessions(opts: { popped?: boolean } = {}) {
           tabs,
           active: tabs.includes(g.active) ? g.active : (tabs[0] as string),
         })
-      // a grid keeps its shape: a group that held only a new chat comes back as one
-      else if (saved?.grid) ws.groups.push(newGroup(ws))
+      // every group comes back: one that held only a new chat comes back as one
+      else ws.groups.push(newGroup(ws))
     }
     // no layout yet: two groups side by side, which chats fill left to right
     if (!ws.groups.length) ws.groups.push(newGroup(ws), newGroup(ws))
@@ -1596,7 +2227,7 @@ export function createSessions(opts: { popped?: boolean } = {}) {
       saved?.sizes?.length === ws.groups.length ? saved.sizes : Array(ws.groups.length).fill(1)
     ws.focus = Math.min(Math.max(saved?.focus ?? 0, 0), ws.groups.length - 1)
     ws.grid = !!saved?.grid
-    if (saved?.rows?.length === 2) ws.rows = saved.rows
+    if (saved?.rows?.length && saved.rows.every((f) => f > 0)) ws.rows = saved.rows
     ws.term.setAccent(colour)
     const onCount = (count: number) => {
       ws.changeCount = count
@@ -1606,6 +2237,31 @@ export function createSessions(opts: { popped?: boolean } = {}) {
     q('changes').appendChild(ws.changes.el)
     q('files').appendChild(ws.files.el)
     wireGroups(ws)
+    // side by side, the name bar over the column: × takes it off the screen
+    ;(q('head').firstElementChild as HTMLElement).textContent = name
+    q('off').addEventListener('click', (e) => {
+      e.stopPropagation()
+      takeOff(path)
+    })
+    const head = q('head')
+    head.title = 'Drag to move · double-click to show only this · right-click for more'
+    head.addEventListener('pointerdown', (e) => dragSide(path, e))
+    head.addEventListener('dblclick', (e) => {
+      if (!(e.target as HTMLElement).closest('button')) showAlone(path)
+    })
+    // a middle click closes it, as on a tab
+    head.addEventListener('mousedown', (e) => {
+      if (e.button === 1) e.preventDefault()
+    })
+    head.addEventListener('auxclick', (e) => {
+      if (e.button !== 1) return
+      e.preventDefault()
+      takeOff(path)
+    })
+    head.addEventListener('contextmenu', (e) => {
+      e.preventDefault()
+      tabMenu(path, e.clientX, e.clientY)
+    })
     workspaces.set(path, ws)
     if (!order.includes(path)) order.push(path)
     ws.changes.refresh()
@@ -1785,8 +2441,8 @@ export function createSessions(opts: { popped?: boolean } = {}) {
       }
       const r = col.getBoundingClientRect()
       const edge = Math.min(r.width * 0.28, 160)
-      if (ws.groups.length < MAX_GROUPS && e.clientX < r.left + edge) return { gi, where: 'left' }
-      if (ws.groups.length < MAX_GROUPS && e.clientX > r.right - edge) return { gi, where: 'right' }
+      if (e.clientX < r.left + edge) return { gi, where: 'left' }
+      if (e.clientX > r.right - edge) return { gi, where: 'right' }
       return { gi, where: 'in' }
     }
     w.addEventListener('dragover', (e) => {
@@ -1883,7 +2539,9 @@ export function createSessions(opts: { popped?: boolean } = {}) {
     if (!s) return ''
     const st = stateOf(s)
     const acct = accountLabel(s)
-    const tip = `${titleOf(s)}\n${STATE_WORD[st] ?? st} · ${modelName(s.model)} · ${acct}${sub0(s) ? ` · ${sub0(s)}` : ''}\nDrag to move or split · double-click to rename · right-click for more`
+    const bg = s.work?.bg
+    const tip = `${titleOf(s)}\n${STATE_WORD[st] ?? st} · ${modelName(s.model)} · ${acct}${sub0(s) ? ` · ${sub0(s)}` : ''}${s.spawnedBy ? ' · opened by the conductor' : ''}${s.group ? ` · in ${s.group}` : ''}${bg?.length ? `\n${bgTip(bg)}` : ''}\nDrag to move or split · double-click to rename · right-click for more`
+    const eta = bgShort(bg)
     const sub = sub0(s)
     const tint = colourOfChat(id)
     const dup = s.elsewhere
@@ -1894,7 +2552,7 @@ export function createSessions(opts: { popped?: boolean } = {}) {
       : ''
     const lead = s.role === 'conductor'
     return `<button type="button" role="tab" aria-selected="${g.active === id}" class="ws-chat st-${st}${g.active === id ? ' on' : ''}${tint ? ' tinted' : ''}${lead ? ' conductor' : ''}${lead && s.autopilot ? ' away' : ''}" data-chat="${esc(id)}" draggable="true" title="${esc(lead ? `Conductor${s.autopilot ? ' · autopilot on' : ''}\n${tip}` : tip)}"${tint ? ` style="--ws:${tint}"` : ''}>
-          <i class="ws-st"></i>${lead ? '<span class="ws-crown" aria-label="Conductor">♛</span>' : ''}<span class="ws-t">${esc(titleOf(s))}</span>${sub ? `<em class="ws-rp" title="${esc(sub)}">${esc(sub)}</em>` : ''}${dup}${badge}<b data-x="${esc(id)}" title="End chat" aria-label="End chat">×</b>
+          <i class="ws-st"></i>${lead ? '<span class="ws-crown" aria-label="Conductor">♛</span>' : ''}<span class="ws-t">${esc(titleOf(s))}</span>${sub ? `<em class="ws-rp" title="${esc(sub)}">${esc(sub)}</em>` : ''}${eta ? `<em class="ws-eta">${esc(eta)}</em>` : ''}${dup}${badge}<b data-x="${esc(id)}" title="End chat" aria-label="End chat">×</b>
         </button>`
   }
 
@@ -1919,8 +2577,6 @@ export function createSessions(opts: { popped?: boolean } = {}) {
         bar.dataset.html = html
         bar.innerHTML = html
       }
-      const split = col.querySelector<HTMLButtonElement>('[data-gact="split"]')
-      if (split) split.disabled = ws.groups.length >= MAX_GROUPS
       // keep the active tab in view, without fighting your own scrolling
       if (bar.dataset.on !== g.active) {
         bar.dataset.on = g.active
@@ -1952,25 +2608,68 @@ export function createSessions(opts: { popped?: boolean } = {}) {
     box.style.setProperty('--ws', ws.colour)
   }
 
+  // ------------------------------------------------ following the bottom of a chat
+  /*
+   * The rule: only a gesture of yours — the wheel, a finger, the scrollbar, a scrolling key —
+   * may stop a chat following its latest message. A scroll we caused ourselves, and the log
+   * growing under a reply that is still streaming, never count.
+   *
+   * That was the whole of the old bug: the scroll listener recomputed `stick` from the
+   * position on every scroll event, and during a stream more content had already rendered by
+   * the time the event arrived, so the check read as "you scrolled up" and following stopped
+   * on its own. The old follow loop also gave up after 60 frames, which is too short for
+   * images, code blocks and tool output that lay out late.
+   */
+  /** how far off the bottom still counts as the bottom — generous on purpose */
+  const BOTTOM_SLACK = 140
+  /** a scroll this soon after one of your gestures is yours; anything else is the page moving */
+  const GESTURE_MS = 320
+  /** our own scrollTop writes stay invisible to the scroll listener for this long */
+  const SELF_MS = 120
+  /** the keys that scroll a log: pressing one is you moving, the same as the wheel */
+  const SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '])
+
+  /** scroll to the bottom ourselves, and mark it as ours so the listener ignores it */
+  function toBottom(v: View) {
+    if (!v.log.isConnected) return
+    v.selfAt = performance.now()
+    v.log.scrollTop = v.log.scrollHeight
+  }
+
   /** a chat on screen always opens at its latest message */
   function pinBottom(v: View) {
     v.stick = true
     const btn = v.root.querySelector<HTMLElement>('.ss-latest')
     if (btn) btn.hidden = true
-    // messages off screen only get their real height once laid out, so the bottom moves for a
-    // few frames after the first jump: follow it until it holds still
-    let last = -1
-    let still = 0
-    let frames = 0
-    const go = () => {
-      if (!v.stick || !v.log.isConnected) return
-      v.log.scrollTop = v.log.scrollHeight
-      still = v.log.scrollHeight === last ? still + 1 : 0
-      last = v.log.scrollHeight
-      if (still < 3 && ++frames < 60) requestAnimationFrame(go)
-    }
-    go()
+    toBottom(v)
+    // one more after this frame's layout, for messages that only get their real height once
+    // they are on screen. Everything after that is the growth watchers in makeView, so there
+    // is no frame budget left to run out on late images, code blocks or tool output.
+    requestAnimationFrame(() => {
+      if (v.stick) toBottom(v)
+    })
   }
+  /**
+   * Put a view back where it was after a repaint.
+   *
+   * paintCols() rebuilds every column and re-parents each chat's element, and re-parenting a
+   * scroller resets its scrollTop. That is why this used to pin to the bottom unconditionally —
+   * which meant any background refresh (a chat changing state, one arriving or leaving) yanked
+   * you back down while you were reading further up. So: a chat arriving on screen lands at its
+   * latest message, a chat that is following keeps following, and a chat you have scrolled back
+   * in is put back on the exact pixel it was on.
+   */
+  function keepPlace(v: View) {
+    if (!v.root.isConnected) return pinBottom(v)
+    if (v.stick) return void requestAnimationFrame(() => pinBottom(v))
+    const was = v.log.scrollTop
+    requestAnimationFrame(() => {
+      if (!v.log.isConnected || v.log.scrollTop === was) return
+      v.selfAt = performance.now()
+      v.log.scrollTop = was
+    })
+  }
+
   const pinShown = (ws: Workspace) => {
     for (const g of ws.groups) {
       const v = views.get(g.active)
@@ -2001,7 +2700,7 @@ export function createSessions(opts: { popped?: boolean } = {}) {
       if (v) {
         unread.delete(id)
         v.composer.setBusy(v.s.state === 'running' || v.s.state === 'starting')
-        pinBottom(v)
+        keepPlace(v)
         return v.root
       }
     }
@@ -2033,8 +2732,6 @@ export function createSessions(opts: { popped?: boolean } = {}) {
         </div>
         <div class="ws-gbody"></div>`
       ;(col.querySelector('.ws-gbody') as HTMLElement).appendChild(bodyFor(ws, g))
-      // three in a grid: the third takes the whole bottom row
-      if (grid && n === 3 && gi === 2) col.style.gridColumn = '1 / -1'
       return col
     })
     const grip = (i: number, h = false) => {
@@ -2043,8 +2740,14 @@ export function createSessions(opts: { popped?: boolean } = {}) {
       g.title = 'Drag to resize · double-click to even out'
       return g
     }
-    // a grid has one divider down the middle and one across it
-    const grips = grid ? [grip(0), grip(0, true)] : Array.from({ length: n - 1 }, (_, i) => grip(i))
+    // a grid has a divider between each pair of its columns and each pair of its rows
+    const shape = gridShape(n)
+    const grips = grid
+      ? [
+          ...Array.from({ length: shape.c - 1 }, (_, i) => grip(i)),
+          ...Array.from({ length: shape.r - 1 }, (_, i) => grip(i, true)),
+        ]
+      : Array.from({ length: n - 1 }, (_, i) => grip(i))
     ws.cols.replaceChildren(...cols, ...grips)
     ws.built = true
     layoutCols(ws)
@@ -2053,73 +2756,124 @@ export function createSessions(opts: { popped?: boolean } = {}) {
 
   /** a grid needs at least three groups; with fewer it is plain columns */
   const isGrid = (ws: Workspace) => ws.grid && ws.groups.length >= 3
-  function layoutCols(ws: Workspace) {
-    if (isGrid(ws)) {
-      const c: [number, number] = [ws.sizes[0] ?? 1, ws.sizes[1] ?? 1]
-      const r: [number, number] = [ws.rows[0] ?? 1, ws.rows[1] ?? 1]
-      ws.cols.style.gridTemplateColumns = c.map((f) => `minmax(0, ${f}fr)`).join(' ')
-      ws.cols.style.gridTemplateRows = r.map((f) => `minmax(0, ${f}fr)`).join(' ')
-      const across = (r[0] / (r[0] + r[1])) * 100
-      const down = ws.cols.querySelector<HTMLElement>('.ws-rz:not(.h)')
-      if (down) {
-        down.style.left = `calc(${(c[0] / (c[0] + c[1])) * 100}% - 4px)`
-        // with three, the bottom chat spans the width: the divider stops at the top row
-        down.style.bottom = ws.groups.length === 3 ? `${100 - across}%` : '0'
-      }
-      const h = ws.cols.querySelector<HTMLElement>('.ws-rz.h')
-      if (h) h.style.top = `calc(${across}% - 4px)`
-      return
-    }
-    ws.cols.style.gridTemplateRows = ''
-    ws.cols.style.gridTemplateColumns = ws.sizes.map((f) => `minmax(0, ${f}fr)`).join(' ')
-    const total = ws.sizes.reduce((a, b) => a + b, 0)
+  /** a grid's shape: as square as it goes, so it wraps as it grows (5 and 6 are 3×2, 7 to 9 are 3×3) */
+  const gridShape = (n: number) => {
+    const c = Math.ceil(Math.sqrt(n))
+    return { c, r: Math.ceil(n / c) }
+  }
+  /**
+   * Tracks that keep their proportions down to a readable minimum and no further: the smallest
+   * track's floor is `min`, the others' floors keep the same ratio, so a row either fits at its
+   * fractions or is every floor at once and scrolls. Returns the template and where each boundary
+   * sits once it is at its floors.
+   */
+  const tracks = (sz: number[], min: number, gap = 0) => {
+    const lo = Math.min(...sz)
+    const floors = sz.map((f) => Math.round((min * f) / lo))
+    const at: number[] = []
     let acc = 0
-    for (const g of ws.cols.querySelectorAll<HTMLElement>('.ws-rz')) {
-      acc += ws.sizes[Number(g.dataset.rz)] ?? 1
-      g.style.left = `calc(${(acc / total) * 100}% - 4px)`
+    for (const [k, f] of floors.entries()) {
+      acc += f
+      at.push(acc + gap * k)
+    }
+    return {
+      template: sz.map((f, k) => `minmax(${floors[k]}px, ${f}fr)`).join(' '),
+      at,
+      floor: acc,
     }
   }
+  /** a boundary as a fraction of the visible width, or at its floors once it scrolls */
+  const edge = (frac: number, px: number) => `max(calc(${frac * 100}% - 4px), ${px - 4}px)`
 
+  function layoutCols(ws: Workspace) {
+    const n = ws.groups.length
+    const sum = (a: number[], k = a.length) => a.slice(0, k).reduce((x, y) => x + y, 0)
+    if (isGrid(ws)) {
+      const { c, r } = gridShape(n)
+      const cs = Array.from({ length: c }, (_, k) => ws.sizes[k] ?? 1)
+      if (ws.rows.length !== r) ws.rows = Array(r).fill(1)
+      const X = tracks(cs, MIN_GROUP_W, 1)
+      const Y = tracks(ws.rows, MIN_GROUP_H, 1)
+      ws.cols.style.gridTemplateColumns = X.template
+      ws.cols.style.gridTemplateRows = Y.template
+      // a short last row: its last group takes the rest of the row (three is two over one)
+      const short = n % c !== 0
+      for (const col of ws.cols.querySelectorAll<HTMLElement>('.ws-col'))
+        col.style.gridColumn =
+          short && Number(col.dataset.g) === n - 1 ? `${((n - 1) % c) + 1} / -1` : ''
+      const lastTop = edge(sum(ws.rows, r - 1) / sum(ws.rows), (Y.at[r - 2] ?? 0) + 4)
+      for (const g of ws.cols.querySelectorAll<HTMLElement>('.ws-rz')) {
+        const k = Number(g.dataset.rz)
+        if (g.classList.contains('h')) {
+          g.style.top = edge(sum(ws.rows, k + 1) / sum(ws.rows), Y.at[k] ?? 0)
+          g.style.width = `max(100%, ${X.floor + c - 1}px)`
+        } else {
+          g.style.left = edge(sum(cs, k + 1) / sum(cs), X.at[k] ?? 0)
+          // down the grid, stopping above a short last row that spans it
+          g.style.height = short && r > 1 ? lastTop : `max(100%, ${Y.floor + r - 1}px)`
+          g.style.bottom = 'auto'
+        }
+      }
+      ws.el.style.setProperty('--ws-min', `${X.floor + c - 1}px`)
+      return
+    }
+    for (const col of ws.cols.querySelectorAll<HTMLElement>('.ws-col')) col.style.gridColumn = ''
+    const X = tracks(ws.sizes, MIN_GROUP_W)
+    ws.cols.style.gridTemplateRows = ''
+    ws.cols.style.gridTemplateColumns = X.template
+    for (const g of ws.cols.querySelectorAll<HTMLElement>('.ws-rz')) {
+      const k = Number(g.dataset.rz)
+      g.style.left = edge(sum(ws.sizes, k + 1) / sum(ws.sizes), X.at[k] ?? 0)
+      g.style.height = ''
+      g.style.bottom = ''
+    }
+    // side by side, a project column is never narrower than its groups' floors: the page scrolls
+    ws.el.style.setProperty('--ws-min', `${X.floor}px`)
+  }
+
+  /**
+   * Drag a divider, in pixels, under the pointer. When the row fits, the groups either side trade
+   * width until the far one reaches its floor, and past that the near one keeps growing and the
+   * row scrolls. When the row already scrolls, only the near group changes and the row gets
+   * longer or shorter. Nothing goes under its floor.
+   */
   function resizeCols(ws: Workspace, grip: HTMLElement, e: PointerEvent) {
     e.preventDefault()
     const i = Number(grip.dataset.rz)
+    const across = grip.classList.contains('h')
+    const n = ws.groups.length
+    const { c, r } = isGrid(ws) ? gridShape(n) : { c: n, r: 1 }
+    const cells = [...ws.cols.querySelectorAll<HTMLElement>('.ws-col')]
+    // one cell per track: along the first row for columns, down the first column for rows
+    const px0 = Array.from({ length: across ? r : c }, (_, k) => {
+      const box = cells[across ? k * c : k]?.getBoundingClientRect()
+      return (across ? box?.height : box?.width) ?? 0
+    })
+    if (!px0[i] || !px0[i + 1]) return
+    const sizes = across ? ws.rows : ws.sizes
+    const min = across ? MIN_GROUP_H : MIN_GROUP_W
+    const over = across
+      ? ws.cols.scrollHeight > ws.cols.clientHeight + 1
+      : ws.cols.scrollWidth > ws.cols.clientWidth + 1
+    const from = across ? e.clientY : e.clientX
+    const [a0, b0] = [px0[i] as number, px0[i + 1] as number]
     grip.setPointerCapture(e.pointerId)
     grip.classList.add('drag')
     ws.cols.classList.add('resizing')
-    if (isGrid(ws)) {
-      // a grid's dividers: across splits the two rows, down splits the two columns
-      const across = grip.classList.contains('h')
-      const sizes = across ? ws.rows : ws.sizes
-      const pairTotal = (sizes[0] ?? 1) + (sizes[1] ?? 1)
-      const moveGrid = (m: PointerEvent) => {
-        const r = ws.cols.getBoundingClientRect()
-        const f = across ? (m.clientY - r.top) / r.height : (m.clientX - r.left) / r.width
-        const first = Math.max(0.18, Math.min(0.82, f)) * pairTotal
-        sizes[0] = first
-        sizes[1] = pairTotal - first
-        layoutCols(ws)
-      }
-      const upGrid = () => {
-        grip.removeEventListener('pointermove', moveGrid)
-        grip.removeEventListener('pointerup', upGrid)
-        grip.classList.remove('drag')
-        ws.cols.classList.remove('resizing')
-        saveWs(ws)
-      }
-      grip.addEventListener('pointermove', moveGrid)
-      grip.addEventListener('pointerup', upGrid)
-      return
-    }
-    const total = ws.sizes.reduce((a, b) => a + b, 0)
-    const pair = (ws.sizes[i] ?? 1) + (ws.sizes[i + 1] ?? 1)
-    const before = ws.sizes.slice(0, i).reduce((a, b) => a + b, 0)
-    const min = total * 0.16
     const move = (m: PointerEvent) => {
-      const r = ws.cols.getBoundingClientRect()
-      const at = ((m.clientX - r.left) / r.width) * total - before
-      const left = Math.max(min, Math.min(pair - min, at))
-      ws.sizes[i] = left
-      ws.sizes[i + 1] = pair - left
+      const d = (across ? m.clientY : m.clientX) - from
+      const px = [...px0]
+      if (d >= 0) {
+        px[i] = a0 + d
+        px[i + 1] = over ? b0 : Math.max(min, b0 - d)
+      } else {
+        const take = Math.min(-d, a0 - min)
+        px[i] = a0 - take
+        px[i + 1] = over ? b0 : b0 + take
+      }
+      // the sizes are the pixel widths, scaled to average 1: at its floors the row is these widths
+      const avg = px.reduce((x, y) => x + y, 0) / px.length
+      for (const [k, w] of px.entries()) sizes[k] = w / avg
       layoutCols(ws)
     }
     const up = () => {
@@ -2132,6 +2886,12 @@ export function createSessions(opts: { popped?: boolean } = {}) {
     grip.addEventListener('pointermove', move)
     grip.addEventListener('pointerup', up)
   }
+
+  /** bring a group into view when it is scrolled out of it: after a split, a move, a focus key */
+  const revealGroup = (ws: Workspace, gi: number) =>
+    ws.cols
+      .querySelector<HTMLElement>(`.ws-col[data-g="${gi}"]`)
+      ?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' })
 
   function focusInput(ws: Workspace) {
     const g = focused(ws)
@@ -2191,6 +2951,7 @@ export function createSessions(opts: { popped?: boolean } = {}) {
     ws.focus = gi
     unread.delete(g.active)
     paintWsBar(ws)
+    revealGroup(ws, gi)
     saveWs(ws)
     if (withInput) focusInput(ws)
     focusRing()
@@ -2211,16 +2972,9 @@ export function createSessions(opts: { popped?: boolean } = {}) {
         const at = Math.max(0, Math.min(to.newAt, ws.groups.length))
         if (at === from || at === from + 1) return focusGroup(ws, from)
       }
-      if (ws.groups.length >= MAX_GROUPS) {
-        dst = ws.groups[
-          to.newAt <= from ? Math.max(0, from - 1) : Math.min(ws.groups.length - 1, from + 1)
-        ] as Group
-        if (dst === src) return
-      } else {
-        dst = newGroup(ws, [])
-        ws.groups.splice(Math.max(0, Math.min(to.newAt, ws.groups.length)), 0, dst)
-        ws.sizes = Array(ws.groups.length).fill(1)
-      }
+      dst = newGroup(ws, [])
+      ws.groups.splice(Math.max(0, Math.min(to.newAt, ws.groups.length)), 0, dst)
+      ws.sizes = Array(ws.groups.length).fill(1)
     } else dst = ws.groups[to.group] ?? src
     const i = src.tabs.indexOf(id)
     src.tabs.splice(i, 1)
@@ -2240,6 +2994,7 @@ export function createSessions(opts: { popped?: boolean } = {}) {
     tidyGroups(ws, [src])
     ws.focus = Math.max(0, ws.groups.indexOf(dst))
     paintCols(ws)
+    revealGroup(ws, ws.focus)
     saveWs(ws)
     focusInput(ws)
     focusRing()
@@ -2247,24 +3002,26 @@ export function createSessions(opts: { popped?: boolean } = {}) {
 
   function splitRight(ws: Workspace, gi = ws.focus) {
     if (ws.pane !== 'chats') setPane(ws, 'chats', false)
-    if (ws.groups.length >= MAX_GROUPS)
-      return focusGroup(ws, Math.min(gi + 1, ws.groups.length - 1))
     ws.groups.splice(gi + 1, 0, newGroup(ws))
     ws.sizes = Array(ws.groups.length).fill(1)
-    // four side by side is too narrow to read: four is a grid
-    if (ws.groups.length === 4) ws.grid = true
+    // a split never changes the layout under you: a row stays a row (and scrolls past what
+    // fits), a grid takes the new group into its tiling
     ws.focus = gi + 1
     paintCols(ws)
+    revealGroup(ws, ws.focus)
     saveWs(ws)
     focusInput(ws)
     focusRing()
   }
 
-  /** four chats at once, two by two: adds new-chat groups up to four and arranges them */
+  /**
+   * The groups as a grid: at least two by two (it adds new-chat groups up to four), and past four
+   * it wraps as square as it goes — 3×2, then 3×3 — rather than stopping. Again: back to a row.
+   */
   function quad(ws: Workspace, on = !isGrid(ws)) {
     if (ws.pane !== 'chats') setPane(ws, 'chats', false)
     if (on) {
-      while (ws.groups.length < MAX_GROUPS) ws.groups.push(newGroup(ws))
+      while (ws.groups.length < 4) ws.groups.push(newGroup(ws))
       ws.grid = true
     } else ws.grid = false
     ws.sizes = Array(ws.groups.length).fill(1)
@@ -2381,10 +3138,73 @@ export function createSessions(opts: { popped?: boolean } = {}) {
     return `<svg class="gm-glyph" viewBox="0 0 ${W} ${H}" width="${W + 2}" height="${H + 2}" aria-hidden="true">${rects}</svg>`
   }
 
+  // ------------------------------------------------------------ chat groups (chat-groups.ts)
+  /** the chat groups you folded away in the lists */
+  const folded = collapsedGroups()
+  const chatGroupHead = (g: string, n: number, cls: string) =>
+    `<div class="cg-h ${cls}${folded.has(g) ? ' folded' : ''}" data-cg="${esc(g)}" role="button" aria-expanded="${!folded.has(g)}" title="${folded.has(g) ? 'Show' : 'Hide'} the chats in ${esc(g)}"><i class="cg-car">▾</i><span>${esc(g)}</span><small>${n}</small></div>`
+  /** a list's rows with a group's chats together under its name; a folded group shows only its name */
+  const withChatGroups = <T>(
+    list: readonly T[],
+    groupOf: (x: T) => unknown,
+    rowOf: (x: T) => string,
+    cls: string,
+  ) =>
+    groupRuns(list, groupOf)
+      .map((r) =>
+        r.group
+          ? chatGroupHead(r.group, r.items.length, cls) +
+            (folded.has(r.group) ? '' : r.items.map(rowOf).join(''))
+          : r.items.map(rowOf).join(''),
+      )
+      .join('')
+  /** a chat moved to a group, or out of any ("Move to group…"): the host keeps it */
+  async function moveToGroup(id: string, group: string | null) {
+    const r = await post(`/sessions/${encodeURIComponent(id)}/group`, { group: group ?? '' }).catch(
+      () => null,
+    )
+    if (!r?.ok) return noServer('Could not move that chat')
+    const got = (await r.json().catch(() => null)) as Summary | null
+    const g = got ? (got.group ?? null) : tidyGroup(group)
+    for (const x of [summaries.find((y) => y.id === id), views.get(id)?.s]) if (x) x.group = g
+    if (!$('history').hidden) paintLibRows()
+    refresh()
+  }
+  async function newGroupFor(id: string) {
+    const to = await ask({
+      title: 'New group',
+      body: 'Chats in a group are listed together under its name, e.g. the project they are for.',
+      input: '',
+      ok: 'Move',
+    })
+    if (typeof to === 'string' && tidyGroup(to)) moveToGroup(id, to)
+  }
+  /** "Move to group…" on a chat: the groups in use, a new one, or none */
+  function groupPicker(ws: Workspace, id: string, x: number, y: number) {
+    const s = summaryOf(id)
+    if (!s) return
+    cmenuFor = { ws, id }
+    const now = tidyGroup(s.group)
+    const item = (k: string, label: string, on = false) =>
+      `<button type="button" role="menuitem" data-cm="${esc(k)}"${on ? ' disabled' : ''}><span>${esc(label)}</span>${on ? '<kbd>✓</kbd>' : ''}</button>`
+    const groups = knownGroups(summaries)
+    cmenu.innerHTML = [
+      `<div class="cm-h"><span>Move “${esc(titleOf(s))}” to</span></div>`,
+      ...groups.map((g) => item(`cg:${g}`, g, g === now)),
+      groups.length ? '<hr>' : '',
+      item('cg-new', 'New group…'),
+      item('cg-none', 'No group', !now),
+    ].join('')
+    cmenu.style.setProperty('--wsc', ws.colour)
+    cmenu.hidden = false
+    cmenu.style.left = `${Math.min(x, innerWidth - cmenu.offsetWidth - 8)}px`
+    cmenu.style.top = `${Math.min(y, innerHeight - cmenu.offsetHeight - 8)}px`
+    ;(cmenu.querySelector('button:not([disabled])') as HTMLElement | null)?.focus()
+  }
+
   /** the ⋯ menu on a group's tab bar: the folder's chats by where they are, and the layout */
   function groupMenu(ws: Workspace, gi: number, anchor: HTMLElement) {
     const n = ws.groups.length
-    const full = n >= MAX_GROUPS
     const chats = ws.chats.map((id) => summaryOf(id)).filter((s): s is Summary => !!s)
     const count = (k: string) => chats.filter((s) => stateOf(s) === k).length
     const need = count('waiting')
@@ -2413,7 +3233,7 @@ export function createSessions(opts: { popped?: boolean } = {}) {
           : ''
       return `<div class="pop-i chat gm-row${shownHere ? ' on' : ''}" role="menuitem" tabindex="-1" data-val="${esc(s.id)}" data-st="${st}">
         <i class="ws-st st-${st}"></i>
-        <span><b>${esc(titleOf(s))}</b><em>${esc(STATE_WORD[st] ?? st)} · ${esc(modelName(s.model))} · ${esc(ago(s.updatedAt))}</em></span>
+        <span><b>${esc(titleOf(s))}</b><em>${esc(STATE_WORD[st] ?? st)}${bgShort(s.work?.bg) ? ` · ${esc(bgShort(s.work?.bg))}` : ''} · ${esc(modelName(s.model))} · ${esc(ago(s.updatedAt))}</em></span>
         ${badge}
         <span class="gm-acts">${here}<button type="button" class="gm-x end" data-val="__end:${esc(s.id)}" title="End chat…" aria-label="End chat">×</button></span>
       </div>`
@@ -2425,21 +3245,31 @@ export function createSessions(opts: { popped?: boolean } = {}) {
         .filter((id) => id !== 'new')
         .map((id) => chats.find((s) => s.id === id))
         .filter((s): s is Summary => !!s)
-        .map((s) => row(s, k))
-        .join('')
-    const loose = chats
-      .filter((s) => groupIndex(ws, s.id) < 0)
-      .map((s) => row(s, -1))
-      .join('')
+    // within each, a chat group's chats together under its name
+    const rows = (list: Summary[], k: number) =>
+      withChatGroups(
+        list,
+        (s) => s.group,
+        (s) => row(s, k),
+        'gm-cg',
+      )
+    const loose = rows(
+      chats.filter((s) => groupIndex(ws, s.id) < 0),
+      -1,
+    )
     const order = [gi, ...ws.groups.map((_, k) => k).filter((k) => k !== gi)]
     const sections =
       n > 1
         ? order
             .map((k) =>
-              section(k === gi ? `This group` : `Group ${k + 1}`, groupGlyph(ws, k), inGroup(k)),
+              section(
+                k === gi ? `This group` : `Group ${k + 1}`,
+                groupGlyph(ws, k),
+                rows(inGroup(k), k),
+              ),
             )
             .join('') + section('Not on screen', '', loose)
-        : inGroup(0) + section('Not on screen', '', loose)
+        : rows(inGroup(0), 0) + section('Not on screen', '', loose)
 
     const tile = (val: string, icon: string, label: string, key: string, off = false, hint = '') =>
       `<button type="button" class="gm-tile" data-val="${val}"${off ? ' disabled' : ''} title="${esc(hint || label)}${key ? ` (${key})` : ''}"><span class="gm-ti">${icon}</span><b>${label}</b>${key ? `<kbd>${key}</kbd>` : '<kbd class="none"></kbd>'}</button>`
@@ -2451,14 +3281,14 @@ export function createSessions(opts: { popped?: boolean } = {}) {
        <div class="gm-foot">
          <div class="gm-tiles">
            ${tile('__new', ICON.plus, 'New chat', 'N', false, 'New chat in this group')}
-           ${tile('__split', ICON.split, 'Split', '⌥⌘\\', full, full ? 'Four groups is the most' : 'Split right: a new group beside this one')}
-           ${tile('__quad', isGrid(ws) ? ICON.split : ICON.quad, isGrid(ws) ? 'Row' : 'Grid', '⌥⌘G', false, isGrid(ws) ? 'Put the groups back in one row' : 'Four groups, two by two')}
+           ${tile('__split', ICON.split, 'Split', '⌥⌘\\', false, 'Split right: a new group beside this one')}
+           ${tile('__quad', isGrid(ws) ? ICON.split : ICON.quad, isGrid(ws) ? 'Row' : 'Grid', '⌥⌘G', false, isGrid(ws) ? 'Put the groups back in one row' : 'The groups as a grid: two by two, wrapping past four')}
            ${tile('__even', ICON.even, 'Even', '', n < 2, 'Even out the group sizes')}
          </div>
          <div class="gm-links">
            <button type="button" data-val="__past">${ICON.past}<span>Past chats</span></button>
            ${n > 1 ? `<button type="button" data-val="__close" title="Its chats keep running, in the group beside">×<span>Close group</span></button>` : ''}
-           <span class="gm-keys" title="Previous or next tab in this group"><kbd>⌥⌘←</kbd><kbd>→</kbd> tabs</span>
+           <span class="gm-keys" title="Previous or next tab in this group"><kbd>⌥⌘[</kbd><kbd>]</kbd> tabs</span>
          </div>
        </div>`,
       (val) => {
@@ -2484,6 +3314,14 @@ export function createSessions(opts: { popped?: boolean } = {}) {
       'gmenu',
     )
     pop.style.setProperty('--ws', ws.colour)
+    // a chat group's name folds its chats away, or shows them again
+    const pick = pop.onclick
+    pop.onclick = (e) => {
+      const h = (e.target as HTMLElement).closest<HTMLElement>('[data-cg]')
+      if (!h) return pick?.call(pop, e)
+      folded.toggle(h.dataset.cg as string)
+      groupMenu(ws, gi, anchor)
+    }
   }
 
   // right-click on a chat tab
@@ -2500,7 +3338,6 @@ export function createSessions(opts: { popped?: boolean } = {}) {
     const g = ws.groups[gi]
     const i = g ? g.tabs.indexOf(id) : -1
     const n = ws.groups.length
-    const full = n >= MAX_GROUPS
     const item = (k: string, label: string, hint = '', off = false, cls = '') =>
       `<button type="button" role="menuitem" class="${cls}" data-cm="${k}"${off ? ' disabled' : ''}><span>${label}</span>${hint ? `<kbd>${hint}</kbd>` : ''}</button>`
     const alone = (g?.tabs.filter((t) => t !== 'new').length ?? 0) < 2
@@ -2510,16 +3347,17 @@ export function createSessions(opts: { popped?: boolean } = {}) {
         'right',
         gi < n - 1 ? 'Move to the group on the right' : 'Split right',
         '⌃⌘→',
-        gi === n - 1 && (full || alone),
+        gi === n - 1 && alone,
       ),
       item(
         'left',
         gi > 0 ? 'Move to the group on the left' : 'Split left',
         '⌃⌘←',
-        gi === 0 && (full || alone),
+        gi === 0 && alone,
       ),
       '<hr>',
       item('rename', 'Rename…', 'double-click'),
+      item('group', 'Move to group…', esc(s.group ?? '')),
       `<div class="cm-colours" role="group" aria-label="Colour">${[null, ...PALETTE]
         .map((c) => {
           const on = (colourOfChat(id) ?? null) === c
@@ -2573,6 +3411,16 @@ export function createSessions(opts: { popped?: boolean } = {}) {
     const { ws, id } = f
     if (k === 'right' || k === 'left') return moveSideways(ws, id, k === 'right' ? 1 : -1)
     if (k === 'rename') return startRename(ws, id)
+    if (k === 'group')
+      return groupPicker(
+        ws,
+        id,
+        parseFloat(cmenu.style.left) || 0,
+        parseFloat(cmenu.style.top) || 0,
+      )
+    if (k.startsWith('cg:')) return void moveToGroup(id, k.slice(3))
+    if (k === 'cg-none') return void moveToGroup(id, null)
+    if (k === 'cg-new') return void newGroupFor(id)
     if (k.startsWith('colour:')) {
       const s = summaryOf(id)
       if (!s) return
@@ -2628,6 +3476,11 @@ export function createSessions(opts: { popped?: boolean } = {}) {
     endOnHost(id)
     const v = views.get(id)
     v?.es?.close()
+    v?.cockpit?.()
+    v?.grow?.disconnect()
+    v?.fit?.disconnect()
+    v?.unwatch?.()
+    if (v) disposeRunStrip(v.log)
     views.delete(id)
     if (!perChat) resubscribe()
     unread.delete(id)
@@ -2704,7 +3557,6 @@ export function createSessions(opts: { popped?: boolean } = {}) {
     if (spread.length) flexSpread()
     else ws.el.style.flex = ''
     for (const w of shown) {
-      w.el.dataset.name = w.name
       w.el.classList.toggle('ws-active', shown.length > 1 && w.path === activeWs)
       if (!w.cols.children.length) paintCols(w)
       else if (!same) pinShown(w)
@@ -2713,21 +3565,23 @@ export function createSessions(opts: { popped?: boolean } = {}) {
   }
   function resizeSpread(i: number, grip: HTMLElement, e: PointerEvent) {
     e.preventDefault()
+    // in pixels, under the pointer, so it tracks the same when the columns scroll; a column
+    // stops at its groups' floors (its min-width)
+    const [a, b] = [spread[i], spread[i + 1]].map((p) => (p ? workspaces.get(p)?.el : undefined))
+    if (!a || !b) return
+    const floor = (w: HTMLElement) => Number.parseFloat(getComputedStyle(w).minWidth) || 0
+    const a0 = a.getBoundingClientRect().width
+    const both = a0 + b.getBoundingClientRect().width
+    const [minA, minB] = [floor(a), floor(b)]
+    const pair = (spreadSizes[i] ?? 1) + (spreadSizes[i + 1] ?? 1)
+    const x0 = e.clientX
     grip.setPointerCapture(e.pointerId)
     grip.classList.add('drag')
     pane.classList.add('sizing')
-    const total = spreadSizes.reduce((a, b) => a + b, 0)
-    const before = spreadSizes.slice(0, i).reduce((a, b) => a + b, 0)
-    const pair = (spreadSizes[i] ?? 1) + (spreadSizes[i + 1] ?? 1)
-    const min = total * 0.12
     const move = (m: PointerEvent) => {
-      const r = pane.getBoundingClientRect()
-      const left = Math.max(
-        min,
-        Math.min(pair - min, ((m.clientX - r.left) / r.width) * total - before),
-      )
-      spreadSizes[i] = left
-      spreadSizes[i + 1] = pair - left
+      const w = Math.max(minA, Math.min(both - minB, a0 + m.clientX - x0))
+      spreadSizes[i] = (pair * w) / both
+      spreadSizes[i + 1] = pair - (spreadSizes[i] as number)
       flexSpread()
     }
     const up = () => {
@@ -2748,17 +3602,13 @@ export function createSessions(opts: { popped?: boolean } = {}) {
     focusRing()
   }
 
-  /** open a workspace beside the one you are in; with four on screen it takes the last one's place */
+  /** open a workspace beside the one you are in; past what fits, the columns scroll */
   function openBeside(path: string) {
     const ws = ensureWs(wsKey(path))
     if (!activeWs) return setWs(ws.path)
     if (ws.path === activeWs) return
     if (spread.includes(ws.path)) return focusSide(ws.path)
     const next = spread.length ? [...spread] : [activeWs]
-    if (next.length >= MAX_SPREAD) {
-      const drop = next.findLastIndex((p) => p !== activeWs)
-      next.splice(drop, 1)
-    }
     next.splice(next.indexOf(activeWs) + 1, 0, ws.path)
     spread = next
     spreadSizes = spread.map(() => 1)
@@ -2767,16 +3617,12 @@ export function createSessions(opts: { popped?: boolean } = {}) {
     if (spread.length > 2 && docked) setDocked(false)
     settle()
   }
-  /** every open tab side by side, as many as fit: the one you are in and its neighbours */
+  /** every open tab side by side, in tab order; past what fits, the columns scroll */
   function spreadTabs() {
     if (!activeWs) return
-    const at = order.indexOf(activeWs)
-    const near = order
-      .filter((p) => workspaces.has(p))
-      .sort((a, b) => Math.abs(order.indexOf(a) - at) - Math.abs(order.indexOf(b) - at))
-      .slice(0, MAX_SPREAD)
-    if (near.length < 2) return
-    spread = order.filter((p) => near.includes(p))
+    const all = order.filter((p) => workspaces.has(p))
+    if (all.length < 2) return
+    spread = all
     spreadSizes = spread.map(() => 1)
     if (spread.length > 2 && docked) setDocked(false)
     settle()
@@ -2785,9 +3631,113 @@ export function createSessions(opts: { popped?: boolean } = {}) {
     const i = spread.indexOf(path)
     const j = i + by
     if (i < 0 || j < 0 || j >= spread.length) return
-    ;[spread[i], spread[j]] = [spread[j] as string, spread[i] as string]
-    ;[spreadSizes[i], spreadSizes[j]] = [spreadSizes[j] ?? 1, spreadSizes[i] ?? 1]
+    moveSide(i, j)
+  }
+  /** a column to another place in the spread, its width going with it; the others slide over */
+  function moveSide(from: number, to: number) {
+    if (from === to || !spread[from]) return
+    const els = spread.map((p) => workspaces.get(p)?.el)
+    const was = new Map(els.map((w) => [w, w?.getBoundingClientRect().left ?? 0]))
+    const [p] = spread.splice(from, 1)
+    const [size] = spreadSizes.splice(from, 1)
+    spread.splice(to, 0, p as string)
+    spreadSizes.splice(to, 0, size ?? 1)
     settle()
+    // FLIP: each column starts where it was and glides to where it is now
+    for (const w of els) {
+      if (!w) continue
+      w.style.transition = 'none'
+      w.style.transform = ''
+    }
+    const now = new Map(els.map((w) => [w, w?.getBoundingClientRect().left ?? 0]))
+    for (const w of els)
+      if (w) w.style.transform = `translateX(${(was.get(w) ?? 0) - (now.get(w) ?? 0)}px)`
+    void pane.offsetWidth
+    for (const w of els) {
+      if (!w) continue
+      w.style.transition = 'transform 0.22s cubic-bezier(0.2, 0.7, 0.2, 1)'
+      w.style.transform = ''
+    }
+    setTimeout(() => {
+      for (const w of els) if (w) w.style.transition = ''
+      revealSide(p as string)
+    }, 260)
+  }
+  /** a project column scrolled out of view comes back into it */
+  const revealSide = (path: string) =>
+    workspaces
+      .get(path)
+      ?.el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' })
+  /** drag a column by its name bar: the others make room, a marker shows where it lands */
+  function dragSide(path: string, e: PointerEvent) {
+    const from = spread.indexOf(path)
+    const head = e.currentTarget as HTMLElement
+    if (e.button !== 0 || from < 0 || (e.target as HTMLElement).closest('button')) return
+    const els = spread.map((p) => workspaces.get(p)?.el as HTMLElement)
+    const me = els[from] as HTMLElement
+    const x0 = e.clientX
+    let rects: DOMRect[] = []
+    let on = false
+    let to = from
+    const mark = el('div', 'ws-side-mark')
+    const move = (m: PointerEvent) => {
+      const dx = m.clientX - x0
+      if (!on) {
+        if (Math.abs(dx) < 5) return
+        on = true
+        rects = els.map((w) => w.getBoundingClientRect())
+        const pr = pane.getBoundingClientRect()
+        Object.assign(mark.style, { top: `${pr.top}px`, height: `${pr.height}px` })
+        document.body.appendChild(mark)
+        pane.classList.add('side-drag')
+        me.classList.add('side-lifted')
+      }
+      const r = rects[from] as DOMRect
+      const lo = (rects[0] as DOMRect).left - r.left
+      const hi = (rects.at(-1) as DOMRect).right - r.right
+      const d = Math.max(lo, Math.min(hi, dx))
+      me.style.transform = `translateX(${d}px)`
+      // where it lands: the pointer past the middle of a neighbour is past that neighbour
+      const px = Math.max(lo + r.left, Math.min(hi + r.right, m.clientX))
+      to = rects.filter((x, i) => i !== from && x.left + x.width / 2 < px).length
+      const shift = r.width + 6
+      els.forEach((w, i) => {
+        if (i === from) return
+        const by =
+          from < to && i > from && i <= to ? -shift : to < from && i >= to && i < from ? shift : 0
+        w.style.transform = by ? `translateX(${by}px)` : ''
+      })
+      mark.hidden = to === from
+      // the seam between where it lands and the neighbour that made room
+      const t = rects[to] as DOMRect
+      const at = to < from ? t.left + r.width + 3 : t.right - r.width - 3
+      mark.style.left = `${at - 1.5}px`
+    }
+    const up = () => {
+      head.removeEventListener('pointermove', move)
+      head.removeEventListener('pointerup', up)
+      head.removeEventListener('pointercancel', up)
+      if (!on) return
+      mark.remove()
+      pane.classList.remove('side-drag')
+      me.classList.remove('side-lifted')
+      if (to === from) {
+        for (const w of els) {
+          w.style.transition = 'transform 0.18s ease-out'
+          w.style.transform = ''
+        }
+        return setTimeout(() => {
+          for (const w of els) w.style.transition = ''
+        }, 200)
+      }
+      moveSide(from, to)
+    }
+    try {
+      head.setPointerCapture(e.pointerId)
+    } catch {}
+    head.addEventListener('pointermove', move)
+    head.addEventListener('pointerup', up)
+    head.addEventListener('pointercancel', up)
   }
   /** back to one workspace: the one given, else the one you are in */
   function showAlone(path = activeWs) {
@@ -2805,10 +3755,12 @@ export function createSessions(opts: { popped?: boolean } = {}) {
     if (spread.length < 2) spread = []
     setWs(next)
   }
-  function focusSide(path: string) {
+  /** make a side the one you are in; `reveal` scrolls it into view (not on a click into it) */
+  function focusSide(path: string, reveal = true) {
     if (!spread.includes(path) || path === activeWs) return
     activeWs = path
     for (const p of spread) workspaces.get(p)?.el.classList.toggle('ws-active', p === path)
+    if (reveal) revealSide(path)
     paintTabs()
     paintViews()
     saveLayout()
@@ -2821,7 +3773,7 @@ export function createSessions(opts: { popped?: boolean } = {}) {
       if (!spread.length) return
       const w = (e.target as HTMLElement).closest<HTMLElement>('.ws')
       const hit = spread.find((p) => workspaces.get(p)?.el === w)
-      if (hit) focusSide(hit)
+      if (hit) focusSide(hit, false)
     },
     true,
   )
@@ -2916,69 +3868,529 @@ export function createSessions(opts: { popped?: boolean } = {}) {
         ? '<p class="hi-empty">Nothing matches.</p>'
         : ''))
 
-  // ------------------------------------------------------------ history
-  function paintHistory(filter?: string) {
-    const h = $('history')
-    const input = h.querySelector<HTMLInputElement>('.hi-q')
-    const needle = (filter ?? input?.value ?? '').trim().toLowerCase()
-    const match = (...xs: string[]) => !needle || xs.some((x) => x.toLowerCase().includes(needle))
-    const mine = summaries.filter((s) => match(s.title, s.repo))
-    const inApp = new Set(summaries.map((s) => s.sdkSessionId))
-    const others = elsewhere.filter((e) => !inApp.has(e.id) && match(e.title, e.repo)).slice(0, 40)
-    const row = (
-      key: string,
-      val: string,
-      state: string,
-      title: string,
-      repo: string,
-      when: string,
-      need: string,
-    ) =>
-      `<button type="button" class="hi ${esc(state)}" data-${key}="${esc(val)}">
+  // ------------------------------------------------------------ history: the chat library
+  /**
+   * Every Claude chat on this machine, from /api/control/library: search titles as you type or
+   * the words inside messages, narrow by project and account, pinned ones on top, archived ones
+   * out of the way. Rows open, rename, pin, archive or delete (to the Trash), by mouse or keys.
+   */
+  const lib = {
+    q: '',
+    deep: false,
+    project: '',
+    account: '',
+    state: '',
+    sort: 'updated',
+    archived: false,
+    items: [] as LibItem[],
+    next: null as string | null,
+    total: 0,
+    facets: { projects: [], accounts: [] } as Record<
+      'projects' | 'accounts',
+      { name: string; count: number }[]
+    >,
+    loading: false,
+    /** a message search that stopped at its budget: how far it got */
+    searched: null as { scanned: number; of: number } | null,
+    seq: 0,
+    timer: 0,
+    /** the chat states last painted */
+    sig: '',
+    wired: false,
+  }
+  const libItem = (id: string) => lib.items.find((x) => x.id === id)
+  /** how a chat stands, from the app when it is open here, else from the recent-sessions scan */
+  function libState(x: LibItem): { state: string; need: string } {
+    const s = summaries.find((y) => y.sdkSessionId === x.id)
+    if (s) return { state: needs(s) ? 'waiting' : s.state, need: needs(s) ? 'needs you' : '' }
+    const e = elsewhere.find((y) => y.id === x.id)
+    if (!e) return { state: '', need: '' }
+    return {
+      state: e.state === 'needs-you' ? 'waiting' : e.state,
+      need: e.state === 'needs-you' ? 'your turn' : e.state === 'blocked' ? 'blocked' : '',
+    }
+  }
+  function libRow(x: LibItem) {
+    const { state, need } = libState(x)
+    const acct =
+      manyAccounts() && x.account
+        ? (accountOf(x.account)?.label ?? x.account).replace(/@.*$/, '')
+        : ''
+    const sub = [short(x.repo), x.branch && x.branch !== 'HEAD' ? x.branch : '', acct]
+      .filter(Boolean)
+      .join(' · ')
+    const sn = x.snippet
+    const snip = sn
+      ? `<small class="lib-snip">${esc(sn.text.slice(0, sn.start))}<mark>${esc(sn.text.slice(sn.start, sn.start + sn.length))}</mark>${esc(sn.text.slice(sn.start + sn.length))}</small>`
+      : ''
+    const act = (k: string, label: string, key: string, icon: string, on = false) =>
+      `<button type="button" class="lib-act${on ? ' on' : ''}" data-la="${k}" title="${label} (${key})" aria-label="${label}" tabindex="-1">${icon}</button>`
+    return `<div class="hi lib-row ${esc(state)}${x.archived ? ' archived' : ''}" role="option" tabindex="-1" aria-selected="false" data-lib-id="${esc(x.id)}"${x.colour ? ` style="--chat:${esc(x.colour)}"` : ''}>
         <i class="st ${esc(state)}"></i>
-        <span class="hi-t">${esc(title || 'Untitled')}<em>${esc(repo)}</em></span>
-        <span class="hi-w">${need ? `<b>${esc(need)}</b>` : esc(when)}</span>
-      </button>`
-    const html = `${
-      mine.length
-        ? `<h5>Running in this app</h5>${mine.map((s) => row('goto', s.id, s.state, s.title, s.repo, ago(s.updatedAt), needs(s) ? 'needs you' : '')).join('')}`
-        : ''
-    }${
-      others.length
-        ? `<h5>Other sessions <small>resume here</small></h5>${others
-            .map((e) =>
-              row(
-                'resume',
-                e.id,
-                e.state === 'needs-you' ? 'waiting' : e.state,
-                e.title,
-                short(e.repo),
-                ago(e.updated),
-                e.state === 'needs-you' ? 'your turn' : e.state === 'blocked' ? 'blocked' : '',
-              ),
-            )
-            .join('')}`
-        : ''
-    }${!mine.length && !others.length ? '<p class="hi-empty">No sessions match.</p>' : ''}`
-    const list = h.querySelector('.hi-list')
-    if (list) {
-      list.innerHTML = html
+        <span class="hi-t">${x.pinned ? `<b class="lib-pin" title="Pinned">${ICON.pin}</b>` : ''}${esc(x.title)}<em>${esc(sub)}${x.here ? ' · <span class="lib-here">open here</span>' : ''}</em>${snip}</span>
+        <span class="hi-w">${need ? `<b>${esc(need)}</b>` : esc(ago(x.updated))}</span>
+        <span class="lib-acts">${act('pin', x.pinned ? 'Unpin' : 'Pin', 'P', ICON.pin, x.pinned)}${act('rename', 'Rename', 'R', ICON.rename)}${act('archive', x.archived ? 'Unarchive' : 'Archive', 'E', ICON.archive, x.archived)}${act('delete', 'Delete', '⌫', ICON.trash)}</span>
+      </div>`
+  }
+  function paintLibRows() {
+    const h = $('history')
+    const rows = h.querySelector<HTMLElement>('[data-lib="rows"]')
+    const more = h.querySelector<HTMLElement>('[data-lib="more"]')
+    if (!rows || !more) return
+    const focused = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>(
+      '[data-lib-id]',
+    )?.dataset.libId
+    // a search inside messages comes back unfiltered: the project and account narrow it here
+    const shown = lib.deep
+      ? lib.items.filter(
+          (x) =>
+            (!lib.project || x.repo === lib.project) &&
+            (!lib.account || (x.account ?? 'none') === lib.account),
+        )
+      : lib.items
+    const pinned = !lib.deep && shown.some((x) => x.pinned)
+    let html = ''
+    shown.forEach((x, i) => {
+      if (pinned && i === 0) html += '<h5>Pinned</h5>'
+      if (pinned && !x.pinned && shown[i - 1]?.pinned) html += '<h5>Chats</h5>'
+      if (!lib.deep && !x.pinned) return
+      html += libRow(x)
+    })
+    // the rest: a group's chats open here come together under its name (not in a message search)
+    if (!lib.deep) {
+      const groupOf = new Map(summaries.map((y) => [y.sdkSessionId, y.group]))
+      html += withChatGroups(
+        shown.filter((x) => !x.pinned),
+        (x) => groupOf.get(x.id),
+        libRow,
+        'lib-cg',
+      )
+    }
+    if (!shown.length && !lib.loading)
+      html = `<p class="hi-empty">${
+        lib.deep
+          ? lib.q.trim().length < 2
+            ? 'Type at least two letters to search inside messages.'
+            : 'No message says that.'
+          : lib.q || lib.project || lib.account || lib.state
+            ? 'No chats match.'
+            : 'No Claude chats on this machine yet.'
+      }</p>`
+    rows.innerHTML = html
+    more.innerHTML = lib.loading
+      ? `<p class="hi-empty">${lib.deep ? 'Searching messages…' : 'Loading…'}</p>`
+      : !lib.next
+        ? ''
+        : lib.deep
+          ? `<button type="button" class="lib-more" data-lib-more>Search older chats<small>${lib.searched ? `${lib.searched.scanned} of ${lib.searched.of} read` : ''}</small></button>`
+          : `<button type="button" class="lib-more" data-lib-more>Show more<small>${lib.items.length} of ${lib.total}</small></button>`
+    const count = h.querySelector<HTMLElement>('[data-lib="count"]')
+    if (count)
+      count.textContent = lib.deep
+        ? `${shown.length} found`
+        : `${lib.total} chat${lib.total === 1 ? '' : 's'}`
+    if (focused) h.querySelector<HTMLElement>(`[data-lib-id="${CSS.escape(focused)}"]`)?.focus()
+  }
+  function paintLibFilters() {
+    const h = $('history')
+    const opt = (v: string, label: string, on: string) =>
+      `<option value="${esc(v)}"${v === on ? ' selected' : ''}>${esc(label)}</option>`
+    const proj = h.querySelector<HTMLSelectElement>('[data-lf="project"]')
+    const fp = lib.facets.projects
+    if (proj)
+      proj.innerHTML =
+        opt('', 'All projects', lib.project) +
+        (lib.project && !fp.some((f) => f.name === lib.project)
+          ? opt(lib.project, short(lib.project), lib.project)
+          : '') +
+        fp.map((f) => opt(f.name, `${short(f.name)} · ${f.count}`, lib.project)).join('')
+    const acct = h.querySelector<HTMLSelectElement>('[data-lf="account"]')
+    if (acct) {
+      const fa = lib.facets.accounts
+      acct.hidden = fa.length < 2 && !lib.account
+      const label = (id: string) =>
+        id === 'none' ? 'Other folder' : (accountOf(id)?.label ?? id).replace(/@.*$/, '')
+      acct.innerHTML =
+        opt('', 'All accounts', lib.account) +
+        fa.map((f) => opt(f.name, `${label(f.name)} · ${f.count}`, lib.account)).join('')
+    }
+  }
+  async function loadLibrary(more = false) {
+    const seq = ++lib.seq
+    lib.loading = true
+    if (!more) {
+      lib.items = []
+      lib.next = null
+      lib.searched = null
+    }
+    paintLibRows()
+    const p = new URLSearchParams()
+    if (lib.archived) p.set('archived', '1')
+    if (more && lib.next) p.set('cursor', lib.next)
+    let url = ''
+    if (lib.deep) {
+      if (lib.q.trim().length < 2) {
+        lib.loading = false
+        return paintLibRows()
+      }
+      p.set('q', lib.q.trim())
+      url = `${LIBRARY}/search?${p}`
+    } else {
+      p.set('limit', '60')
+      p.set('sort', lib.sort)
+      for (const k of ['q', 'project', 'account', 'state'] as const) if (lib[k]) p.set(k, lib[k])
+      url = `${LIBRARY}?${p}`
+    }
+    const r = await fetch(url, { signal: AbortSignal.timeout(lib.deep ? 30_000 : 20_000) })
+      .then((x) => (x.ok ? x.json() : null))
+      .catch(() => null)
+    if (seq !== lib.seq) return
+    lib.loading = false
+    if (!r) {
+      paintLibRows()
+      const rows = $('history').querySelector<HTMLElement>('[data-lib="rows"]')
+      if (rows && !lib.items.length)
+        rows.innerHTML = '<p class="hi-empty">Could not read the chat library.</p>'
       return
     }
-    h.innerHTML = `<input class="hi-q" placeholder="Search sessions" aria-label="Search sessions" /><div class="hi-list">${html}</div>`
+    if (lib.deep) {
+      const seen = new Set(lib.items.map((x) => x.id))
+      lib.items.push(...(r.hits as LibItem[]).filter((x) => !seen.has(x.id)))
+      lib.next = r.next == null ? null : String(r.next)
+      lib.searched = r.next == null ? null : { scanned: Number(r.next), of: Number(r.of) }
+      lib.total = lib.items.length
+    } else {
+      lib.items = more ? lib.items.concat(r.items) : r.items
+      lib.next = r.next
+      lib.total = r.total
+      lib.facets = r.facets
+      paintLibFilters()
+    }
+    paintLibRows()
+  }
+  /** after the search changes: titles almost at once, messages once you pause */
+  function reloadLibrary() {
+    clearTimeout(lib.timer)
+    lib.timer = window.setTimeout(() => loadLibrary(), lib.deep ? 400 : 120)
+  }
+  function openLibItem(x: LibItem) {
+    toggleHistory(false)
+    const s = summaries.find((y) => y.sdkSessionId === x.id)
+    if (s) {
+      const ws = ensureWs(wsKey(s.cwd))
+      addChat(ws, s.id)
+      setWs(ws.path)
+      return showChat(ws, s.id)
+    }
+    const e = elsewhere.find((y) => y.id === x.id)
+    resume({
+      id: x.id,
+      cwd: x.cwd ?? x.repoPath ?? '',
+      repo: short(x.repo),
+      title: x.title,
+      state: e?.state ?? '',
+      account: x.account,
+    })
+  }
+  /** keep the place in the list when a row leaves it */
+  const neighbour = (id: string) => {
+    const rows = [...$('history').querySelectorAll<HTMLElement>('[data-lib-id]')]
+    const at = rows.findIndex((r) => r.dataset.libId === id)
+    return rows[at + 1]?.dataset.libId ?? rows[at - 1]?.dataset.libId
+  }
+  const focusRow = (id: string | undefined) =>
+    requestAnimationFrame(() => {
+      const h = $('history')
+      ;(
+        (id && h.querySelector<HTMLElement>(`[data-lib-id="${CSS.escape(id)}"]`)) ||
+        h.querySelector<HTMLElement>('[data-lib-id]')
+      )?.focus()
+    })
+  const noServer = (title: string) =>
+    ask({ title, body: 'The app server did not answer. Try again in a moment.', cancel: null })
+  async function libAction(kind: string, x: LibItem) {
+    if (kind === 'open') return openLibItem(x)
+    if (kind === 'pin' || kind === 'archive') {
+      const on = kind === 'pin' ? !x.pinned : !x.archived
+      if (!(await patchLibrary(x.id, kind === 'pin' ? { pinned: on } : { archived: on })))
+        return noServer('Could not save that')
+      const after = neighbour(x.id)
+      await loadLibrary()
+      return focusRow(libItem(x.id) ? x.id : after)
+    }
+    if (kind === 'rename') {
+      const to = await ask({
+        title: 'Rename chat',
+        body: 'Leave it empty to go back to the title Claude gave it.',
+        input: x.title,
+        ok: 'Rename',
+      })
+      if (typeof to !== 'string') return focusRow(x.id)
+      const t = to.replace(/\s+/g, ' ').trim().slice(0, 120)
+      const title = t === x.autoTitle ? '' : t
+      if (!(await patchLibrary(x.id, { title }))) return noServer('Could not rename it')
+      // a chat open in a tab takes the new name too
+      if (title) names.set(x.id, title)
+      else names.delete(x.id)
+      saveNamesLocally()
+      paintTabs()
+      const ws = activeWs ? workspaces.get(activeWs) : undefined
+      if (ws) paintWsBar(ws)
+      x.title = title || x.autoTitle || 'Untitled'
+      x.named = !!title
+      paintLibRows()
+      return focusRow(x.id)
+    }
+    if (kind === 'delete') {
+      if (x.here || summaries.some((s) => s.sdkSessionId === x.id)) {
+        await ask({
+          title: `“${x.title}” is open in the app`,
+          body: 'End the chat first (End chat, in its tab menu), then delete it here.',
+          cancel: null,
+        })
+        return focusRow(x.id)
+      }
+      const yes = await ask({
+        title: `Delete “${x.title}”?`,
+        body: `Its conversation in ${short(x.repo)} goes to the Trash, with its brief and what the library kept about it. Until you empty the Trash you can put it back from Finder.`,
+        ok: 'Move to Trash',
+        danger: true,
+      })
+      if (!yes) return focusRow(x.id)
+      const r = await fetch(`${LIBRARY}/delete`, {
+        method: 'POST',
+        headers: WRITE,
+        body: JSON.stringify({ id: x.id }),
+        signal: AbortSignal.timeout(20_000),
+      })
+        .then(async (res) => ({
+          ok: res.ok,
+          error: ((await res.json().catch(() => ({}))) as { error?: string }).error,
+        }))
+        .catch(() => ({ ok: false, error: 'The app server did not answer.' }))
+      if (!r.ok) {
+        await ask({ title: 'Could not delete that chat', body: r.error ?? '', cancel: null })
+        return focusRow(x.id)
+      }
+      const after = neighbour(x.id)
+      names.delete(x.id)
+      chatColours.delete(x.id)
+      saveNamesLocally()
+      elsewhere = elsewhere.filter((e) => e.id !== x.id)
+      lib.items = lib.items.filter((y) => y.id !== x.id)
+      lib.total = Math.max(0, lib.total - 1)
+      paintLibRows()
+      return focusRow(after)
+    }
+  }
+  /** the popover itself outlives its contents: its listeners are added once */
+  function wireLibrary(h: HTMLElement) {
+    lib.wired = true
+    h.addEventListener('change', (e) => {
+      const t = e.target as HTMLInputElement
+      const f = t.dataset.lf
+      if (f === 'deep' || f === 'archived') lib[f] = t.checked
+      else if (f === 'project' || f === 'account' || f === 'state' || f === 'sort') lib[f] = t.value
+      else return
+      h.classList.toggle('deep', lib.deep)
+      loadLibrary()
+      if (f === 'deep') h.querySelector<HTMLElement>('.hi-q')?.focus()
+    })
+    h.addEventListener('click', (e) => {
+      const t = e.target as HTMLElement
+      if (t.closest('[data-lib-more]')) return loadLibrary(true)
+      const cg = t.closest<HTMLElement>('[data-cg]')?.dataset.cg
+      if (cg) {
+        folded.toggle(cg)
+        return paintLibRows()
+      }
+      const id = t.closest<HTMLElement>('[data-lib-id]')?.dataset.libId
+      const x = id ? libItem(id) : undefined
+      if (x) libAction(t.closest<HTMLElement>('[data-la]')?.dataset.la ?? 'open', x)
+    })
+    h.addEventListener('focusin', (e) => {
+      const row = (e.target as HTMLElement).closest<HTMLElement>('[data-lib-id]')
+      for (const r of h.querySelectorAll<HTMLElement>('[data-lib-id]')) {
+        r.classList.toggle('on', r === row)
+        r.setAttribute('aria-selected', String(r === row))
+      }
+    })
+  }
+  function paintHistory() {
+    const h = $('history')
+    if (h.querySelector('[data-lib="rows"]')) {
+      // chat states moved on: repaint the rows (never the search box or the filters under you),
+      // and only when a state did change, so a row is not replaced under the pointer every refresh
+      const sig = lib.items
+        .map(
+          (x) =>
+            `${Object.values(libState(x)).join(':')}:${summaries.find((y) => y.sdkSessionId === x.id)?.group ?? ''}`,
+        )
+        .join()
+      if (!lib.loading && sig !== lib.sig) paintLibRows()
+      lib.sig = sig
+      return
+    }
+    h.innerHTML = `
+      <div class="lib-top">
+        <input class="hi-q" placeholder="Search chats" aria-label="Search chats" value="${esc(lib.q)}" />
+        <label class="lib-tog" title="Search the words inside messages, not only titles"><input type="checkbox" data-lf="deep"${lib.deep ? ' checked' : ''} /><span>In messages</span></label>
+      </div>
+      <div class="lib-filters">
+        <select data-lf="project" aria-label="Project"></select>
+        <select data-lf="account" aria-label="Account" hidden></select>
+        <select data-lf="state" aria-label="Where it is open">
+          <option value="">Open or not</option>
+          <option value="here"${lib.state === 'here' ? ' selected' : ''}>Open in this app</option>
+          <option value="other"${lib.state === 'other' ? ' selected' : ''}>Not open here</option>
+        </select>
+        <select data-lf="sort" aria-label="Sort">
+          <option value="updated">Last active</option>
+          <option value="created"${lib.sort === 'created' ? ' selected' : ''}>Started</option>
+          <option value="title"${lib.sort === 'title' ? ' selected' : ''}>Title</option>
+        </select>
+        <label class="lib-tog"><input type="checkbox" data-lf="archived"${lib.archived ? ' checked' : ''} /><span>Archived</span></label>
+        <span class="lib-count" data-lib="count"></span>
+      </div>
+      <div class="hi-list" role="listbox" aria-label="Claude chats">
+        <div data-lib="rows"></div>
+        <div data-lib="more"></div>
+      </div>
+      <footer class="lib-keys"><span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>↵</kbd> open</span><span><kbd>P</kbd> pin</span><span><kbd>R</kbd> rename</span><span><kbd>E</kbd> archive</span><span><kbd>⌫</kbd> delete</span></footer>`
+    paintLibFilters()
     const q = h.querySelector('.hi-q') as HTMLInputElement
-    q.addEventListener('input', () => paintHistory(q.value))
+    const list = h.querySelector('.hi-list') as HTMLElement
+    const rowEls = () => [...h.querySelectorAll<HTMLElement>('[data-lib-id]')]
+    q.addEventListener('input', () => {
+      lib.q = q.value
+      reloadLibrary()
+    })
+    q.addEventListener('keydown', (k) => {
+      if (k.key === 'ArrowDown') {
+        k.preventDefault()
+        rowEls()[0]?.focus()
+      }
+      if (k.key === 'Enter' && lib.items[0]) {
+        k.preventDefault()
+        openLibItem(lib.items[0])
+      }
+    })
+    if (!lib.wired) wireLibrary(h)
+    list.addEventListener('keydown', (k) => {
+      const row = (k.target as HTMLElement).closest<HTMLElement>('[data-lib-id]')
+      const x = row?.dataset.libId ? libItem(row.dataset.libId) : undefined
+      if (!row || !x || k.metaKey || k.ctrlKey || k.altKey) return
+      const all = rowEls()
+      const i = all.indexOf(row)
+      const go = (j: number) => {
+        const to = all[Math.max(0, Math.min(all.length - 1, j))]
+        to?.focus()
+        to?.scrollIntoView({ block: 'nearest' })
+      }
+      const keys: Record<string, () => unknown> = {
+        ArrowDown: () =>
+          i === all.length - 1 && lib.next && !lib.deep ? loadLibrary(true) : go(i + 1),
+        ArrowUp: () => (i === 0 ? q.focus() : go(i - 1)),
+        Home: () => go(0),
+        End: () => go(all.length - 1),
+        PageDown: () => go(i + 10),
+        PageUp: () => go(i - 10),
+        Enter: () => libAction('open', x),
+        p: () => libAction('pin', x),
+        r: () => libAction('rename', x),
+        F2: () => libAction('rename', x),
+        e: () => libAction('archive', x),
+        Delete: () => libAction('delete', x),
+        Backspace: () => libAction('delete', x),
+      }
+      const fn = keys[k.key.length === 1 ? k.key.toLowerCase() : k.key]
+      if (!fn) return
+      k.preventDefault()
+      k.stopPropagation()
+      fn()
+    })
+    // more as you near the end; a search inside messages reads further only when asked
+    list.addEventListener('scroll', () => {
+      if (lib.deep || lib.loading || !lib.next) return
+      if (list.scrollTop + list.clientHeight > list.scrollHeight - 160) loadLibrary(true)
+    })
+    h.classList.toggle('deep', lib.deep)
     q.focus()
+    q.select()
   }
   function toggleHistory(on = $('history').hidden) {
     const h = $('history')
     h.hidden = !on
+    root.querySelector('[data-act="history"]')?.classList.toggle('on', on)
     if (on) {
       h.innerHTML = ''
-      paintHistory('')
+      paintHistory()
+      loadLibrary()
       refresh()
+      syncLibrary()
     }
   }
+  /** the fleet board: every chat on one line, each decision waiting on you a button (fleet-board.ts) */
+  const fleet = createFleetBoard({
+    api: API,
+    titleOf: (row) => titleOf(summaryOf(row.id)) || row.title,
+    colourOf: (cwd, repo) => repoColour(wsKey(cwd), repo),
+    open: (id) => {
+      const s = summaryOf(id)
+      if (!s) return
+      const ws = ensureWs(wsKey(s.cwd))
+      addChat(ws, s.id)
+      setWs(ws.path)
+      showChat(ws, s.id)
+    },
+    onClose: () => root.querySelector('[data-act="fleet"]')?.classList.remove('on'),
+  })
+  /**
+   * The board is a panel of its own (⌥⌘B, the rail's Fleet button, "Fleet" in the palette), so
+   * it sits beside the chats instead of over them. Registered on request, from main.ts, so the
+   * rail keeps the order main.ts gives it.
+   */
+  let fleetPanel: PanelHandle | null = null
+  function registerFleetPanel() {
+    fleetPanel ??= registerPanel({
+      id: 'fleet',
+      title: 'Fleet',
+      group: 'fleet',
+      chord: 'alt+meta+KeyB',
+      icon: FLEET_ICON,
+      width: { min: 380, default: 560, snaps: [420, 560, 760] },
+      terms: 'fleet board every chat one line decisions approve waiting eta needs you',
+      hint: 'every open chat on one line, and each decision waiting on you',
+      mount: (host) => {
+        host.appendChild(fleet.el)
+      },
+      onVisible: (on) => {
+        fleet.toggle(on)
+        root.querySelector('[data-act="fleet"]')?.classList.toggle('on', on)
+      },
+    })
+    return fleetPanel
+  }
+  function toggleFleet(on = !fleetPanel?.isOpen()) {
+    if (!fleetPanel) return
+    on ? fleetPanel.open() : fleetPanel.close()
+  }
+
+  /** ⌥⌘O from anywhere: the panel opens on its chat library */
+  async function openLibrary() {
+    if (poppedOut) return popOut('claude')
+    await setOpen(true)
+    if ($('history').hidden) toggleHistory(true)
+    else ($('history').querySelector('.hi-q') as HTMLInputElement | null)?.focus()
+  }
+  addEventListener('keydown', (e) => {
+    if (e.metaKey && e.altKey && !e.ctrlKey && !e.shiftKey && e.code === 'KeyO') {
+      e.preventDefault()
+      openLibrary()
+    }
+  })
+  // the command palette's "Chat library"
+  addEventListener('laika:library-open', () => void openLibrary())
 
   // ------------------------------------------------------------ menus (mode, repo, account, /, @)
   const pop = el('div', 'ss-pop')
@@ -3056,7 +4468,7 @@ export function createSessions(opts: { popped?: boolean } = {}) {
       for (const h of pop.querySelectorAll<HTMLElement>('.gm-sec')) {
         let x = h.nextElementSibling as HTMLElement | null
         let any = false
-        while (x && x.matches('[data-val]')) {
+        while (x && x.matches('[data-val], .gm-cg')) {
           any ||= !x.hidden
           x = x.nextElementSibling as HTMLElement | null
         }
@@ -3135,7 +4547,8 @@ export function createSessions(opts: { popped?: boolean } = {}) {
   }
 
   function slashMenu(anchor: HTMLElement, commands: string[], input: HTMLTextAreaElement) {
-    const all = [...new Set(commands)].sort()
+    // the fleet commands work in every chat; the host expands them
+    const all = [...new Set([...FLEET_COMMANDS.map((c) => c.name), ...commands])].sort()
     showPop(
       anchor,
       all.length
@@ -3569,11 +4982,13 @@ export function createSessions(opts: { popped?: boolean } = {}) {
     v.root.classList.toggle('away', !!v.s.autopilot)
     const away = (m: number, label: string) =>
       `<button type="button" data-away="${m}">${label}</button>`
+    const deck = !v.root.classList.contains('deck-shut')
     head.innerHTML = `<span class="cd-crown" aria-hidden="true">♛</span>
       <div class="cd-what"><b>Conductor</b><span title="${esc(v.s.goal ?? '')}">${esc(v.s.goal || 'Tell it the goal below')}</span></div>
+      <button type="button" class="cd-deck-t" data-deck aria-expanded="${deck}" title="${deck ? 'Fold the fleet away' : 'Show the fleet and its queue'}">Fleet<span>${deck ? '▾' : '▸'}</span></button>
       ${
         v.s.autopilot
-          ? `<div class="cd-away on"><span class="cd-pulse"></span><span>Autopilot ${until ? `until ${esc(until)}` : 'until you stop it'}</span>${away(-1, 'I’m back')}</div>`
+          ? `<div class="cd-away on"><span class="cd-pulse"></span><span>${awayState?.on && awayState.conductorId === v.s.id ? 'Away mode' : 'Autopilot'} ${until ? `until ${esc(until)}` : 'until you stop it'}</span>${away(-1, 'I’m back')}</div>`
           : `<div class="cd-away"><span>Step away</span>${away(30, '30m')}${away(60, '1h')}${away(180, '3h')}${away(0, 'Until I’m back')}</div>`
       }`
   }
@@ -3680,12 +5095,21 @@ export function createSessions(opts: { popped?: boolean } = {}) {
       replayStart: 0,
       replayTimer: null,
       stickQueued: false,
+      userAt: 0,
+      selfAt: 0,
+      grow: null,
+      fit: null,
       track: r.querySelector('.ss-track') as HTMLElement,
       lastText: null,
       lastThink: null,
+      lastAway: null,
       epoch: null,
       trackQueued: false,
       trackDirty: true,
+      shown: false,
+      unwatch: null,
+      awayTimer: null,
+      releaseTimer: null,
       trackTops: [],
       trackSize: '',
       trackHere: -1,
@@ -3705,7 +5129,48 @@ export function createSessions(opts: { popped?: boolean } = {}) {
       const head = el('header', 'cd-head')
       r.prepend(head)
       paintLead(v)
+      // the cockpit: every chat as a node, its queue under it (cockpit.ts)
+      const deck = el('div', 'cd-deck')
+      const grip = el('div', 'cd-grip')
+      grip.title = 'Drag to resize'
+      head.after(deck, grip)
+      const ck = mountCockpit(deck)
+      const shut = localStorage.getItem(DECK_KEY) === 'shut'
+      r.classList.toggle('deck-shut', shut)
+      ck.setVisible(!shut)
+      paintLead(v)
+      const h = Number(localStorage.getItem(`${DECK_KEY}.h`))
+      if (h > 0) deck.style.setProperty('--deck-h', `${h}px`)
+      grip.addEventListener('pointerdown', (e) => {
+        e.preventDefault()
+        grip.setPointerCapture(e.pointerId)
+        const y0 = e.clientY
+        const h0 = deck.getBoundingClientRect().height
+        const max = r.getBoundingClientRect().height * 0.6
+        // the grip moves the deck's cap; the deck is still only as tall as its lanes (conductor.css)
+        const move = (m: PointerEvent) => {
+          deck.style.setProperty(
+            '--deck-h',
+            `${Math.round(Math.max(80, Math.min(max, h0 + m.clientY - y0)))}px`,
+          )
+        }
+        const up = () => {
+          grip.removeEventListener('pointermove', move)
+          const now = parseInt(deck.style.getPropertyValue('--deck-h'), 10)
+          if (now > 0) localStorage.setItem(`${DECK_KEY}.h`, String(now))
+        }
+        grip.addEventListener('pointermove', move)
+        grip.addEventListener('pointerup', up, { once: true })
+      })
+      v.cockpit = ck.dispose
       head.addEventListener('click', (e) => {
+        if ((e.target as HTMLElement).closest('[data-deck]')) {
+          const now = !r.classList.toggle('deck-shut')
+          localStorage.setItem(DECK_KEY, now ? 'open' : 'shut')
+          ck.setVisible(now)
+          paintLead(v)
+          return
+        }
         const b = (e.target as HTMLElement).closest<HTMLElement>('[data-away]')
         if (!b) return
         const minutes = Number(b.dataset.away)
@@ -3721,7 +5186,25 @@ export function createSessions(opts: { popped?: boolean } = {}) {
     v.composer = makeComposer({
       placeholder: s.role === 'conductor' ? 'Steer the conductor…' : 'Reply to Claude…',
       mode: s.mode,
+      sent: () =>
+        [...v.log.querySelectorAll<HTMLElement>(':scope > .m-user:not(.from-lead)')].map(
+          (u) => u.dataset.text ?? '',
+        ),
       onSend: (text, images) => {
+        // "@chat do this": to that chat, or its queue, rather than the conductor (cockpit-route.ts)
+        if (
+          v.s.role === 'conductor' &&
+          routeFromConductor(text, {
+            box: v.composer.el,
+            put: (t) => {
+              v.composer.input.value = t
+              v.composer.input.dispatchEvent(new Event('input'))
+            },
+            note: (t, tone) =>
+              append(v, el('div', `m-note${tone === 'err' ? ' err' : ' ok'}`, esc(t))),
+          })
+        )
+          return
         v.stick = true
         // on the page the moment you send, however busy the host is; its own copy replaces this
         const mine = el(
@@ -3772,7 +5255,8 @@ export function createSessions(opts: { popped?: boolean } = {}) {
           })
         if (kind === 'model') modelMenu(anchor, v.s.model, (id) => setModelOf(v, id))
         if (kind === 'slash') slashMenu(anchor, v.commands, v.composer.input)
-        if (kind === 'at') atMenu(anchor, v.s.cwd, v.composer.input)
+        // a conductor's @ names chats (cockpit-route.ts), not files
+        if (kind === 'at' && v.s.role !== 'conductor') atMenu(anchor, v.s.cwd, v.composer.input)
       },
     })
     const next = el('div', 'ss-next')
@@ -3791,6 +5275,14 @@ export function createSessions(opts: { popped?: boolean } = {}) {
     })
     r.appendChild(next)
     r.appendChild(v.composer.el)
+    if (s.role === 'conductor') {
+      const off = attachChatMentions(v.composer.input, v.composer.el)
+      const was = v.cockpit
+      v.cockpit = () => {
+        was?.()
+        off()
+      }
+    }
     v.composer.input.addEventListener('input', () => paintNext(v))
     paintViewChips(v)
     v.composer.el.addEventListener('click', (e) => {
@@ -3821,13 +5313,44 @@ export function createSessions(opts: { popped?: boolean } = {}) {
       if (pin) togglePin(v, pin.closest('.m-user') as HTMLElement)
     })
     v.log.addEventListener('scroll', () => scheduleTrack(v, true), { passive: true })
-    v.log.addEventListener('scroll', () => {
-      // a log taken off screen (switching tabs, moving groups) reports a scroll to the top;
-      // that is not you scrolling up
-      if (!v.log.isConnected || !v.log.clientHeight) return
-      v.stick = v.log.scrollTop + v.log.clientHeight > v.log.scrollHeight - 40
-      latest.hidden = v.stick
+    // the gestures that count as you moving the log yourself
+    const mine = () => {
+      v.userAt = performance.now()
+    }
+    for (const ev of ['wheel', 'touchmove', 'pointerdown'] as const)
+      v.log.addEventListener(ev, mine, { passive: true })
+    v.log.addEventListener('keydown', (e) => {
+      if (SCROLL_KEYS.has(e.key)) mine()
     })
+    v.log.addEventListener(
+      'scroll',
+      () => {
+        // a log taken off screen (switching tabs, moving groups) reports a scroll to the top;
+        // that is not you scrolling up
+        if (!v.log.isConnected || !v.log.clientHeight) return
+        const now = performance.now()
+        const atBottom = v.log.scrollHeight - v.log.scrollTop - v.log.clientHeight <= BOTTOM_SLACK
+        if (now - v.userAt < GESTURE_MS)
+          v.stick = atBottom // yours: the only thing that may stop it following
+        else if (now - v.selfAt < SELF_MS)
+          return // ours, and already at the bottom
+        else if (atBottom) v.stick = true // you scrolled back down: follow again
+        latest.hidden = v.stick
+      },
+      { passive: true },
+    )
+    // The log growing is not you scrolling. While it is following, keep it at the bottom as
+    // content arrives — streamed text, a code block that lays out late, tool output that
+    // expands — and when the log's own box changes size. stickSoon coalesces these to one
+    // scroll per frame however many mutations land in it.
+    v.grow = new MutationObserver(() => stickSoon(v))
+    v.grow.observe(v.log, { childList: true, subtree: true, characterData: true })
+    // and the track down its edge follows the log's box (the conductor's deck growing moves it)
+    v.fit = new ResizeObserver(() => {
+      stickSoon(v)
+      scheduleTrack(v, true)
+    })
+    v.fit.observe(v.log)
     // images and code blocks that finish loading later still leave you at the bottom
     v.log.addEventListener(
       'load',
@@ -3844,6 +5367,18 @@ export function createSessions(opts: { popped?: boolean } = {}) {
     v.tasks.addEventListener('click', () => {
       v.tasksOpen = !v.tasksOpen
       paintTasks(v)
+    })
+    // a chat that is not on screen keeps its events and draws them when it comes back into view
+    v.unwatch = presence.watch(v.root, (on) => {
+      v.shown = on
+      if (v.releaseTimer) clearTimeout(v.releaseTimer)
+      v.releaseTimer = on ? null : setTimeout(() => release(v), RELEASE_AFTER_MS)
+      if (!on) return tickWorking()
+      drain(v)
+      const bg = summaries.find((x) => x.id === v.s.id)?.work?.bg
+      if (bg) paintBackground(v.log, bg)
+      paintRunStrip(v.log, v.s.id)
+      tickWorking()
     })
     connect(v)
     return v
@@ -3980,7 +5515,50 @@ export function createSessions(opts: { popped?: boolean } = {}) {
   function onEvent(v: View, e: Ev) {
     if (e.seq <= v.lastSeq) return
     v.lastSeq = e.seq
-    v.queue.push(e)
+    // streamed words not drawn yet join the ones before them: one update rather than hundreds
+    const last = v.queue[v.queue.length - 1]
+    if (e.t === 'delta' && last?.t === 'delta' && !e.sub && !last.sub) {
+      last.text = String(last.text ?? '') + String(e.text ?? '')
+      last.seq = e.seq
+      last.at = e.at
+    } else v.queue.push(e)
+    drainSoon(v)
+  }
+  /**
+   * A chat's log is the heaviest thing on the page: every message, tool row and diff stays in
+   * memory for as long as the chat is open. One that has been out of view this long gives it
+   * back, and is drawn again from the host (which keeps the whole conversation) the next time it
+   * is shown, exactly as a chat opened for the first time is. A chat with something typed or
+   * pasted in its composer keeps everything. `laika.chat.releaseMs` overrides the wait, for tests.
+   */
+  const RELEASE_AFTER_MS = Number(localStorage.getItem('laika.chat.releaseMs')) || 10 * 60_000
+  function release(v: View) {
+    v.releaseTimer = null
+    if (v.shown || v.root.isConnected || views.get(v.s.id) !== v) return
+    if (v.composer.input.value.trim() || v.composer.images.length) return
+    v.es?.close()
+    v.grow?.disconnect()
+    v.fit?.disconnect()
+    v.unwatch?.()
+    v.cockpit?.()
+    for (const t of [v.awayTimer, v.replayTimer, v.trackTimer]) if (t) clearTimeout(t)
+    trackLater.delete(v)
+    disposeRunStrip(v.log)
+    views.delete(v.s.id)
+    if (!perChat) resubscribe()
+  }
+  /** background draw rate: the window is visible but another app is in use */
+  const AWAY_DRAW_MS = 1000
+  /** draw now when the chat is on screen, once a second in the background, never when hidden */
+  function drainSoon(v: View) {
+    if (!v.shown) return
+    if (presence.atLeast('away')) {
+      v.awayTimer ??= setTimeout(() => {
+        v.awayTimer = null
+        drain(v)
+      }, AWAY_DRAW_MS)
+      return
+    }
     drain(v)
   }
 
@@ -4086,7 +5664,7 @@ export function createSessions(opts: { popped?: boolean } = {}) {
     v.stickQueued = true
     requestAnimationFrame(() => {
       v.stickQueued = false
-      if (v.stick) v.log.scrollTop = v.log.scrollHeight
+      if (v.stick) toBottom(v)
     })
   }
   /** draw queued events ~12ms at a time, so a long history never freezes the page */
@@ -4094,10 +5672,17 @@ export function createSessions(opts: { popped?: boolean } = {}) {
     if (v.draining) return
     v.draining = true
     const step = () => {
+      // gone out of view mid-way: the rest waits for it to come back
+      if (!v.shown) {
+        v.draining = false
+        return
+      }
       const t0 = performance.now()
       while (v.queue.length && performance.now() - t0 < 12) render(v, v.queue.shift() as Ev)
       if (v.queue.length) {
-        setTimeout(step, 0)
+        // one slice per frame, so what it added is laid out and painted before the next: a
+        // backlog (a chat coming back into view) never lands as one long frame
+        requestAnimationFrame(step)
         return
       }
       v.draining = false
@@ -4184,9 +5769,18 @@ export function createSessions(opts: { popped?: boolean } = {}) {
     scheduleTrack(v)
   }
   /** a scroll only relights the prompt you are reading; anything else redraws the track */
+  /** chats whose track waits for the window to be in use again */
+  const trackLater = new Set<View>()
+  presence.onLevel(() => {
+    if (presence.atLeast('away')) return
+    for (const v of trackLater) scheduleTrack(v, true)
+    trackLater.clear()
+  })
   function scheduleTrack(v: View, scrolled = false) {
     if (!scrolled) v.trackDirty = true
     if (v.trackQueued || v.replay) return
+    // in the background the track (prompts down the edge) is redrawn once, on return
+    if (presence.atLeast('away')) return void trackLater.add(v)
     v.trackQueued = true
     requestAnimationFrame(() => {
       v.trackQueued = false
@@ -4369,7 +5963,8 @@ export function createSessions(opts: { popped?: boolean } = {}) {
       (card.querySelector('.m-agent-now') as HTMLElement).textContent = label
   }
   const append = (v: View, node: HTMLElement) => {
-    const w = v.log.querySelector('.m-working')
+    // Claude's working line and the background line stay last
+    const w = v.log.querySelector('.m-working, .m-bg')
     if (w) v.log.insertBefore(node, w)
     else v.log.appendChild(node)
     scheduleTrack(v)
@@ -4440,6 +6035,13 @@ export function createSessions(opts: { popped?: boolean } = {}) {
     w.tokens = d.tokens
     w.phase = d.phase
     tickWorking()
+    if (d.bg) {
+      const row = summaries.find((x) => x.id === v.s.id)
+      if (row?.work) row.work.bg = d.bg
+      if (v.shown) paintBackground(v.log, d.bg)
+    }
+    // and this chat's own run, if it has one going (see /runs); a hidden chat paints it on return
+    if (v.shown) paintRunStrip(v.log, v.s.id)
   }
   /** the working line sits at the very end of the log while Claude is busy */
   const paintWorking = (v: View) => {
@@ -4464,12 +6066,16 @@ export function createSessions(opts: { popped?: boolean } = {}) {
   }
   /** the spinner, the clock and the count, for every chat that is working, on one timer */
   let workTimer: ReturnType<typeof setInterval> | null = null
+  let workGap = 0
   let workFrame = 0
+  /** the spinner turns while you use the window; idle or in the background only the clock moves */
+  presence.onLevel(() => tickWorking())
   function tickWorking() {
     let any = false
     workFrame++
     const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches
     for (const v of views.values()) {
+      if (!v.shown) continue
       const line = v.log.querySelector<HTMLElement>(':scope > .m-working')
       if (!line) continue
       any = true
@@ -4495,11 +6101,12 @@ export function createSessions(opts: { popped?: boolean } = {}) {
       }
       ;(line.children[2] as HTMLElement).textContent = `(${meta})`
     }
-    if (any && !workTimer) workTimer = setInterval(tickWorking, 120)
-    else if (!any && workTimer) {
-      clearInterval(workTimer)
-      workTimer = null
-    }
+    const lvl = presence.current()
+    const gap = !any || lvl === 'hidden' ? 0 : lvl === 'live' ? 120 : 1000
+    if (gap === workGap) return
+    if (workTimer) clearInterval(workTimer)
+    workTimer = gap ? setInterval(tickWorking, gap) : null
+    workGap = gap
   }
   let changesTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -4556,6 +6163,7 @@ export function createSessions(opts: { popped?: boolean } = {}) {
           said.startsWith(FROM_CONDUCTOR) ? 'm-user from-lead' : 'm-user',
           `${imgs.length ? `<div class="m-imgs">${pics}</div>` : ''}${e.text ? `<div class="ss-md">${renderMarkdown(String(e.text))}</div>` : ''}<button type="button" class="m-pin" title="Pin to the track beside this chat" aria-label="Pin">☆</button>`,
         )
+        u.dataset.text = String(e.text ?? '')
         u.dataset.key = textKey(`${e.text ?? ''}|${imgs.length}`)
         u.dataset.pk = promptKey(String(e.text ?? ''))
         u.dataset.at = String(e.at)
@@ -4577,7 +6185,10 @@ export function createSessions(opts: { popped?: boolean } = {}) {
           append(v, v.live)
         }
         v.liveText += String(e.text)
-        v.live.textContent = v.liveText
+        // add to the words already there rather than setting the whole message again
+        if (v.live.childNodes.length === 1 && v.live.firstChild instanceof Text)
+          v.live.firstChild.appendData(String(e.text))
+        else v.live.textContent = v.liveText
         stickSoon(v)
         return
       case 'text': {
@@ -4721,7 +6332,10 @@ export function createSessions(opts: { popped?: boolean } = {}) {
         if (EDITS.has(name) && !e.error) {
           // files on disk moved: refresh the header's change count shortly after
           if (changesTimer) clearTimeout(changesTimer)
-          changesTimer = setTimeout(() => wsOf(v)?.changes.refresh(), 600)
+          changesTimer = setTimeout(
+            () => wsOf(v)?.changes.refresh(),
+            presence.atLeast('away') ? 5000 : 600,
+          )
           return
         }
         if (!text) return
@@ -4754,6 +6368,9 @@ export function createSessions(opts: { popped?: boolean } = {}) {
         stickSoon(v)
         return
       }
+      case 'away':
+        if (e.kind === 'asked') v.lastAway = e
+        return
       case 'permission':
         endLive(v)
         append(v, permissionCard(v, e))
@@ -4763,6 +6380,11 @@ export function createSessions(opts: { popped?: boolean } = {}) {
       case 'question':
         endLive(v)
         append(v, questionCard(v, e))
+        focusAsk(v)
+        return
+      case 'secret':
+        endLive(v)
+        append(v, secretCard(v, e))
         focusAsk(v)
         return
       case 'resolved': {
@@ -4783,6 +6405,11 @@ export function createSessions(opts: { popped?: boolean } = {}) {
                 .map(([q, ans]) => `<span class="m-q">${esc(q)}</span> <b>${esc(ans)}</b>`)
                 .join('<br>')
             : '<span class="m-q">Question skipped</span>'
+        } else if (e.kind === 'secret') {
+          summary =
+            reply.behavior === 'allow'
+              ? '<b class="ok">Saved to the Keychain</b> <span class="m-q">Claude can use it in commands but never sees it</span>'
+              : '<b class="no">Not given</b>'
         } else {
           for (const row of v.rows.values()) row.classList.remove('asking')
           summary =
@@ -4919,11 +6546,17 @@ export function createSessions(opts: { popped?: boolean } = {}) {
       ...(always ? [{ key: 'always', label: always }] : []),
       { key: 'no', label: 'No, and tell Claude what to do differently' },
     ]
+    // away mode refused this just before asking: say why, and offer the allowlist entry it suggests
+    const aw = v.lastAway
+    v.lastAway = null
+    const away = aw && aw.tool === tool && e.seq - aw.seq <= 2 && aw.plain ? aw : null
+    const pattern = away?.allowPattern ? String(away.allowPattern) : ''
     const card = el('div', 'm-ask perm')
     card.dataset.req = String(e.requestId)
     card.innerHTML = `
       <div class="ask-h">Do you want to ${ask[tool] ?? `use <b>${esc(tool)}</b>`}?</div>
       ${e.description ? `<p class="ask-d">${esc(e.description)}</p>` : ''}
+      ${away ? `<p class="ask-d ask-away"><span class="q-tag">Away</span>${esc(String(away.plain))}${pattern ? ` <button type="button" class="ask-allow" data-away-allow>Always allow <code>${esc(pattern)}</code> while away</button>` : ''}</p>` : ''}
       <div class="ask-body">${toolBody(tool, input) || `<pre class="m-json">${esc(JSON.stringify(input, null, 2))}</pre>`}</div>
       <div class="ask-opts" role="listbox">${opts
         .map(
@@ -4952,6 +6585,23 @@ export function createSessions(opts: { popped?: boolean } = {}) {
       const b = (ev.target as HTMLElement).closest<HTMLElement>('[data-opt]')
       if (b) choose(b.dataset.opt ?? '')
     })
+    const allowBtn = card.querySelector<HTMLButtonElement>('[data-away-allow]')
+    allowBtn?.addEventListener('click', async () => {
+      if (card.classList.contains('sent')) return
+      allowBtn.disabled = true
+      // the host works the pattern out again from the waiting request; the page only names it
+      const r = await post(`/sessions/${v.s.id}/away-allow`, { requestId: e.requestId }).catch(
+        () => null,
+      )
+      if (r?.ok) {
+        card.classList.add('sent')
+        allowBtn.textContent = 'Allowed while away'
+        return
+      }
+      const err = (await r?.json().catch(() => null)) as { error?: string } | null
+      allowBtn.disabled = false
+      allowBtn.textContent = err?.error ?? 'Couldn’t save that; try again'
+    })
     note.addEventListener('keydown', (k) => {
       if (k.key === 'Enter') reply({ behavior: 'deny', message: note.value.trim() })
       if (k.key === 'Escape') {
@@ -4973,6 +6623,44 @@ export function createSessions(opts: { popped?: boolean } = {}) {
         all[(i + (k.key === 'ArrowDown' ? 1 : all.length - 1)) % all.length]?.focus()
       }
     })
+    return card
+  }
+
+  /**
+   * a secret Claude needs: typed here, sent once to the chat host, which puts it straight into the
+   * macOS Keychain. It is never shown, echoed into the chat or kept in the page.
+   */
+  function secretCard(v: View, e: Ev): HTMLElement {
+    const card = el('div', 'm-ask secret')
+    card.dataset.req = String(e.requestId)
+    card.innerHTML = `
+      <div class="ask-h"><span class="q-tag">Secret</span>Claude needs <b>${esc(String(e.name))}</b></div>
+      ${e.why ? `<p class="ask-d">${esc(String(e.why))}</p>` : ''}
+      <p class="ask-d">It goes into your macOS Keychain, not the chat. Don’t paste secrets into messages.</p>
+      <form class="ask-opts" autocomplete="off">
+        <label class="opt other"><input type="password" data-secret autocomplete="new-password" spellcheck="false" aria-label="Value for ${esc(String(e.name))}" placeholder="Type or paste it, then ↵" /></label>
+        <div class="ask-foot"><button type="submit" class="ask-go" data-submit disabled>Save to Keychain</button><button type="button" class="ask-skip" data-skip>Don’t give it</button></div>
+      </form>`
+    const form = card.querySelector('form') as HTMLFormElement
+    const input = card.querySelector('[data-secret]') as HTMLInputElement
+    const submit = card.querySelector('[data-submit]') as HTMLButtonElement
+    const reply = (r: Record<string, unknown>) => {
+      if (card.classList.contains('sent')) return
+      card.classList.add('sent')
+      input.value = ''
+      input.disabled = true
+      post(`/sessions/${v.s.id}/respond`, { requestId: e.requestId, reply: r })
+    }
+    input.addEventListener('input', () => {
+      submit.disabled = !input.value
+    })
+    form.addEventListener('submit', (ev) => {
+      ev.preventDefault()
+      if (input.value) reply({ value: input.value })
+    })
+    ;(card.querySelector('[data-skip]') as HTMLElement).addEventListener('click', () =>
+      reply({ behavior: 'deny', message: 'The user chose not to give it' }),
+    )
     return card
   }
 
@@ -5258,18 +6946,20 @@ export function createSessions(opts: { popped?: boolean } = {}) {
     launch.hidden = on
     if (!on) {
       syncWidth()
-      if (timer) clearInterval(timer)
+      timer?.()
       timer = null
       closePop()
       $('history').hidden = true
       focusRing()
       return
     }
-    timer = setInterval(refresh, 4000)
+    timer?.()
+    timer = presence.every(4000, refresh, { now: false })
     if (!restored) {
       pane.innerHTML = '<div class="ws-start"><p class="hi-empty">Loading…</p></div>'
       await loadStatic()
       restored = true
+      syncLibrary()
       // reopen the tabs you had, then add a workspace for every chat already running
       const saved = savedLayout()
       for (const p of saved?.order ?? [])
@@ -5279,9 +6969,7 @@ export function createSessions(opts: { popped?: boolean } = {}) {
         }
       await refresh()
       setWs(saved?.active && workspaces.has(saved.active) ? saved.active : (order[0] ?? null))
-      const was = (saved?.spread ?? saved?.duo ?? [])
-        .filter((p) => workspaces.has(p))
-        .slice(0, MAX_SPREAD)
+      const was = (saved?.spread ?? saved?.duo ?? []).filter((p) => workspaces.has(p))
       if (was.length > 1 && activeWs && was.includes(activeWs)) {
         spread = was
         const d = Math.max(0.2, Math.min(0.8, Number(saved?.duoSize) || 0.5))
@@ -5305,6 +6993,7 @@ export function createSessions(opts: { popped?: boolean } = {}) {
     const t = e.target as HTMLElement
     const act = t.closest<HTMLElement>('[data-act]')?.dataset.act
     if (act === 'close') return setOpen(false)
+    if (act === 'broadcast') return broadcast()
     if (act === 'popout') {
       if (popped) return popOut('claude', false)
       setOpen(false)
@@ -5321,7 +7010,9 @@ export function createSessions(opts: { popped?: boolean } = {}) {
     }
     if (act === 'size') return setDocked(!docked)
     if (act === 'history') return toggleHistory()
+    if (act === 'fleet') return toggleFleet()
     if (act === 'accounts') return paintAccounts()
+    if (act === 'away') return toggleAway()
     if (act === 'add') {
       const anchor = t.closest<HTMLElement>('[data-act]') as HTMLElement
       return showPop(
@@ -5379,20 +7070,59 @@ export function createSessions(opts: { popped?: boolean } = {}) {
     }
   })
 
+  /** one message, or a fleet command, to many chats at once */
+  function broadcast() {
+    openBroadcast({
+      host: root,
+      chats: () =>
+        summaries.map((s) => ({
+          id: s.id,
+          title: titleOf(s),
+          repo: s.repo,
+          state: s.state,
+          role: s.role ?? null,
+          waiting: s.waiting,
+          spawnedBy: s.spawnedBy ?? null,
+          bg: s.work?.bg ?? [],
+        })),
+      send: async (id, text) => (await post(`/sessions/${id}/message`, { text })).ok,
+      done: () => refresh(),
+    })
+  }
+
   // full Claude and the spread answer wherever the cursor is, not only inside the panel
   addEventListener('keydown', (e) => {
     if (!open || !e.metaKey || !e.altKey || e.ctrlKey || root.contains(e.target as Node)) return
-    if (e.code === 'KeyF') {
+    if (e.code === 'KeyE') {
+      e.preventDefault()
+      broadcast()
+    } else if (e.code === 'KeyA') {
+      e.preventDefault()
+      toggleAway()
+    } else if (e.code === 'KeyF') {
       e.preventDefault()
       setDocked(!docked)
     } else if (e.code === 'KeyS' && activeWs) {
       e.preventDefault()
       if (spread.length) showAlone()
       else spreadTabs()
+    } else if (e.shiftKey && activeWs && spread.length && /^Arrow(Left|Right)$/.test(e.key)) {
+      e.preventDefault()
+      shiftSide(activeWs, e.key === 'ArrowLeft' ? -1 : 1)
     }
   })
   root.addEventListener('keydown', (e) => {
     const ws = activeWs ? workspaces.get(activeWs) : undefined
+    // ⌥⌘A: I'm away (or back)
+    if (e.metaKey && e.altKey && !e.ctrlKey && e.code === 'KeyA') {
+      e.preventDefault()
+      return toggleAway()
+    }
+    // ⌥⌘E: broadcast to every chat you pick (⌥⌘B is the fleet board)
+    if (e.metaKey && e.altKey && !e.ctrlKey && e.code === 'KeyE') {
+      e.preventDefault()
+      return broadcast()
+    }
     if (e.ctrlKey && (e.key === '`' || e.code === 'Backquote')) {
       e.preventDefault()
       if (ws) {
@@ -5401,13 +7131,14 @@ export function createSessions(opts: { popped?: boolean } = {}) {
       }
       return
     }
-    // window keys, after VS Code: ⌥⌘← → tabs in a group, ⌥⌘1-3 a group, ⌥⌘\ split right,
-    // ⌃⌘← → move the chat into the group beside
+    // the chats pane's own keys: ⌥⌘[ ] tabs in a group, ⌥⌘1-9 a group, ⌥⌘\ split right,
+    // ⌃⌘← → move the chat into the group beside. ⌥⌘ arrows, ⌥⌘⇧ arrows, ⌥⌘-/=, ⌥⌘↩ and ⌥⌘W
+    // are the window keys (panels.ts), which act on the chat groups as windows.
     if (ws && e.metaKey && (e.altKey || e.ctrlKey) && !(e.altKey && e.ctrlKey)) {
       const arrow = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0
-      if (e.altKey && arrow) {
+      if (e.altKey && !e.shiftKey && (e.code === 'BracketLeft' || e.code === 'BracketRight')) {
         e.preventDefault()
-        return stepChat(ws, arrow)
+        return stepChat(ws, e.code === 'BracketLeft' ? -1 : 1)
       }
       if (e.ctrlKey && arrow) {
         e.preventDefault()
@@ -5423,8 +7154,7 @@ export function createSessions(opts: { popped?: boolean } = {}) {
         e.preventDefault()
         return quad(ws)
       }
-      // ⌥⌘F full Claude, ⌥⌘S spread the tabs across the screen (again: back to one),
-      // ⌥⌘[ ] the folder to the left or right
+      // ⌥⌘F full Claude, ⌥⌘S spread the tabs across the screen (again: back to one)
       if (e.altKey && e.code === 'KeyF') {
         e.preventDefault()
         return setDocked(!docked)
@@ -5433,15 +7163,7 @@ export function createSessions(opts: { popped?: boolean } = {}) {
         e.preventDefault()
         return spread.length ? showAlone() : spreadTabs()
       }
-      if (e.altKey && (e.code === 'BracketLeft' || e.code === 'BracketRight') && spread.length) {
-        e.preventDefault()
-        const to = spread[spread.indexOf(ws.path) + (e.code === 'BracketLeft' ? -1 : 1)]
-        const tw = to ? workspaces.get(to) : undefined
-        if (!to || !tw) return
-        focusSide(to)
-        return focusInput(tw)
-      }
-      const d = e.altKey ? /^Digit([1-4])$/.exec(e.code) : null
+      const d = e.altKey ? /^Digit([1-9])$/.exec(e.code) : null
       if (d) {
         e.preventDefault()
         return focusGroup(ws, Number(d[1]) - 1)
@@ -5592,7 +7314,16 @@ export function createSessions(opts: { popped?: boolean } = {}) {
             ...waitingHere.map((s) =>
               row('cw-goto', s.id, 'waiting', s.title, s.repo, 'your turn'),
             ),
-            ...running.map((s) => row('cw-goto', s.id, s.state, s.title, s.repo, 'working')),
+            ...running.map((s) =>
+              row(
+                'cw-goto',
+                s.id,
+                s.state,
+                s.title,
+                s.repo,
+                bgShort(s.work?.bg) ? `working · ${bgShort(s.work?.bg)}` : 'working',
+              ),
+            ),
             ...waitingElsewhere.map((e) =>
               row(
                 'cw-resume',
@@ -5773,6 +7504,19 @@ export function createSessions(opts: { popped?: boolean } = {}) {
     })
   }
 
+  // the cockpit's nodes (cockpit.ts): open a chat this page already has, by its own id
+  addEventListener('laika:open-chat', async (ev) => {
+    const id = (ev as CustomEvent<{ id: string }>).detail.id
+    // the cockpit's stream can know a chat a moment before this page's list does
+    if (!summaryOf(id)) await refresh()
+    const s = summaryOf(id)
+    if (!s) return
+    await setOpen(true)
+    const ws = ensureWs(wsKey(s.cwd))
+    addChat(ws, s.id)
+    setWs(ws.path)
+    showChat(ws, s.id)
+  })
   // anything in the app can ask for a session to be opened here
   addEventListener('laika:open-session', (ev) => {
     resume(
@@ -5786,9 +7530,7 @@ export function createSessions(opts: { popped?: boolean } = {}) {
     )
   })
   // keep the launcher's "needs you" badge current while the panel is closed
-  setInterval(() => {
-    if (!open) refresh()
-  }, 15000)
+  presence.every(15_000, () => !open && refresh(), { now: false })
   // the widget needs accounts and repos even before the panel is first opened
   loadStatic().then(() => {
     refresh()
@@ -6043,6 +7785,21 @@ export function createSessions(opts: { popped?: boolean } = {}) {
     },
     open: () => setOpen(true),
     close: () => setOpen(false),
+    /** the palette's way to the header's broadcast and accounts buttons */
+    broadcast: async () => {
+      await setOpen(true)
+      broadcast()
+    },
+    accounts: async () => {
+      await setOpen(true)
+      await paintAccounts()
+    },
+    /** the column you are in, one place left or right across the spread; false with none spread */
+    moveColumn: (by: -1 | 1) => {
+      if (!spread.length || !activeWs) return false
+      shiftSide(activeWs, by)
+      return true
+    },
     toggle: () => setOpen(!open),
     isOpen: () => open,
     /** open a chat this app is running, by its Claude session id; false if it isn't one */
@@ -6059,6 +7816,8 @@ export function createSessions(opts: { popped?: boolean } = {}) {
     },
     /** right-click on the ring: offer Claude or the workspace for the repo holding this path */
     menuFor: (indexPath: string, x: number, y: number) => ringMenu(indexPath, x, y),
+    /** put the fleet board in the dock as a panel; main.ts calls it where it wants the button */
+    registerFleetPanel,
     newIn: async (cwd: string) => {
       await setOpen(true)
       openRepo(wsKey(cwd), true)

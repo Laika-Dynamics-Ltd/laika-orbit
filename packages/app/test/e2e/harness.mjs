@@ -59,7 +59,7 @@ export async function guardFiles() {
 }
 
 /**
- * A message from another server on this machine: a page 1brain frames (Mission Control on its
+ * A message from another server on this machine: a page Laika Orbit frames (Mission Control on its
  * own port) is its own app with its own suite, and its console is not this app's failure.
  */
 function otherLocalApp(url) {

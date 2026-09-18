@@ -1,8 +1,9 @@
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { beforeEach, describe, expect, it } from 'vitest'
-import { fleetTools, ROLE, watchFleet } from '../conductor.mjs'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { CONDUCTOR_PROMPT, fleetTools, ROLE, setAwayDigest, watchFleet } from '../conductor.mjs'
+import { setAwayBudget } from '../conductor.mjs'
 
 /** enough of agent-host's Session for the conductor */
 function chat(id, o = {}) {
@@ -119,5 +120,75 @@ describe('autopilot', () => {
     w.setAutopilot(lead, false)
     expect(lead.autopilot).toBe(false)
     expect(lead.events.filter((e) => e.t === 'autopilot').map((e) => e.on)).toEqual([true, false])
+  })
+})
+
+describe('away mode in the conductor', () => {
+  afterEach(() => {
+    setAwayDigest(() => null)
+    vi.useRealTimers()
+  })
+
+  it('tells the conductor what away mode did at its next check-in', () => {
+    vi.useFakeTimers()
+    const lead = chat('lead0000', { role: ROLE })
+    const sessions = new Map([[lead.id, lead]])
+    const w = watchFleet(sessions)
+    w.setAutopilot(lead, true, { minutes: 60 })
+    vi.advanceTimersByTime(0)
+    expect(lead.sent).toHaveLength(1)
+    lead.state = 'idle'
+    lead.lastCheckIn = 0
+    w.awayNote('aaaa1111 (web): no sign of life for 20m; interrupting')
+    vi.advanceTimersByTime(60_000)
+    expect(lead.sent[1].text).toMatch(/^\[autopilot\] Away mode acted:\n- Away mode: aaaa1111 \(web\): no sign of life/)
+    w.setAutopilot(lead, false)
+  })
+
+  it('lists what away mode did in fleet_list', async () => {
+    const lead = chat('lead0000', { role: ROLE })
+    setAwayDigest(() => ({ on: true, autoApproved: 3, leftForUser: [], recoveries: ['x'] }))
+    const tools = fleetTools(lead, new Map([[lead.id, lead]]), stand)
+    const r = JSON.parse((await call(tools, 'fleet_list')).text)
+    expect(r.away).toMatchObject({ autoApproved: 3, recoveries: ['x'] })
+  })
+
+  it('knows about away mode and still keeps risky steps for the user', () => {
+    expect(CONDUCTOR_PROMPT).toMatch(/Away mode/)
+    expect(CONDUCTOR_PROMPT).toMatch(/auto-approved/)
+    expect(CONDUCTOR_PROMPT).toMatch(/irreversible or outward-facing/)
+    expect(CONDUCTOR_PROMPT).toMatch(/permission needs the user/)
+  })
+})
+
+describe('parking, the away budget and stale chats in the prompt', () => {
+  afterEach(() => setAwayBudget(() => null))
+
+  it('tells the conductor about fleet_park, fleet_unpark, the budget and stale chats', () => {
+    expect(CONDUCTOR_PROMPT).toMatch(/fleet_park/)
+    expect(CONDUCTOR_PROMPT).toMatch(/fleet_unpark: .*spawn cap/)
+    expect(CONDUCTOR_PROMPT).toMatch(/away budget/)
+    expect(CONDUCTOR_PROMPT).toMatch(/"stale"/)
+    expect(CONDUCTOR_PROMPT).toMatch(/One the user opened: never close/)
+    // how to lead while the user is away
+    expect(CONDUCTOR_PROMPT).toMatch(/Send, don't suggest, for local and reversible work/)
+    expect(CONDUCTOR_PROMPT).toMatch(/pushing, deploying, merging to main, spending money/)
+    expect(CONDUCTOR_PROMPT).toMatch(/Never leave a chat sitting idle on one blocker/)
+    expect(CONDUCTOR_PROMPT).toMatch(/no && or ; chains/)
+    expect(CONDUCTOR_PROMPT).toMatch(/Do not poll\. Set fleet_wait/)
+  })
+
+  it('asks the away budget before a send', async () => {
+    const lead = chat('lead0000', { role: ROLE })
+    lead.autopilot = true
+    const a = chat('aaaa1111')
+    const tools = fleetTools(lead, new Map([lead, a].map((x) => [x.id, x])), stand)
+    const asked = []
+    setAwayBudget((kind) => (asked.push(kind), 'The away budget is spent'))
+    expect(await call(tools, 'fleet_send', { chat: 'aaaa', text: 'go' })).toEqual({ error: true, text: 'The away budget is spent' })
+    expect(asked).toEqual(['send'])
+    expect(a.sent).toEqual([])
+    setAwayBudget(() => null)
+    expect((await call(tools, 'fleet_send', { chat: 'aaaa', text: 'go' })).error).toBe(false)
   })
 })

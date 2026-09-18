@@ -1,5 +1,5 @@
 /**
- * The published `1brain` package: the CLI and the MCP server bundled to plain JavaScript.
+ * The published `laikaorbit` package: the CLI and the MCP server bundled to plain JavaScript.
  *
  * In this repo the packages run their TypeScript directly, but Node refuses to strip types from
  * anything under node_modules, so what npm installs has to be built. The workspace code (core,
@@ -18,7 +18,7 @@ await build({
   entryPoints: { cli: join(HERE, '../cli/src/index.ts') },
   outdir: DIST,
   bundle: true,
-  splitting: true, // the MCP server is its own chunk, loaded only by `1brain mcp`
+  splitting: true, // the MCP server is its own chunk, loaded only by `laikaorbit mcp`
   format: 'esm',
   platform: 'node',
   target: 'node22',

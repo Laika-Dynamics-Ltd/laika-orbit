@@ -9,6 +9,6 @@ _Last updated: 2026-09-16_
 
 ## Start here
 
-- routers/ENGINEERING.md — the 1brain build itself, retrieval engine and graph viewer
+- routers/ENGINEERING.md — the Laika Orbit build itself, retrieval engine and graph viewer
 - routers/CONTENT.md — research, video production, voice rules
 - routers/CLIENTS.md — client engagements and delivery

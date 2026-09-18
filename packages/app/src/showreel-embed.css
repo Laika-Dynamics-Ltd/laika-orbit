@@ -1,6 +1,6 @@
 /* Inside the Showreel window's shadow root, after the studio's own stylesheet. */
 
-/* the studio's palette, from the active 1brain theme (--ok and --warn inherit as they are) */
+/* the studio's palette, from the active Laika Orbit theme (--ok and --warn inherit as they are) */
 :host {
   --bg: var(--n2);
   --panel: var(--n5);

@@ -1,0 +1,59 @@
+/* the summary card (summary-card.ts): one page on what the chats did, most urgent first */
+.sm{display:flex;flex-direction:column;min-width:0}
+.sm-head{display:flex;align-items:baseline;gap:8px;font-size:9.5px;letter-spacing:.06em;color:var(--dim2)}
+.sm-head .sm-next{margin-left:auto;font-variant-numeric:tabular-nums}
+.sm-headline{font-size:12.5px;line-height:1.4;color:var(--tx);margin-top:4px}
+.sm-away{margin-top:6px;font-size:10.5px;color:var(--violet-lt)}
+.sm-clear{font-size:11.5px;color:var(--ok);padding:3px 3px}
+
+.sm-row{display:flex;align-items:flex-start;gap:8px;padding:4px 3px;border-radius:6px;min-width:0}
+.sm-row[data-sdk]{cursor:pointer}
+.sm-row[data-sdk]:hover,.sm-row[data-sdk]:focus-visible{background:var(--n9);outline:none}
+.sm-dot{width:6px;height:6px;border-radius:50%;background:var(--dim2);flex:none;margin-top:5px}
+.sm-main{flex:1;min-width:0;font-size:12px;line-height:1.35;color:var(--dim)}
+.sm-main>b{font-weight:600;color:var(--tx);margin-right:2px}
+.sm-what{font-size:11px;color:var(--dim2);overflow:hidden;text-overflow:ellipsis;
+ display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.sm-row>em{flex:none;font-style:normal;font-size:10.5px;color:var(--dim2);font-variant-numeric:tabular-nums;margin-top:1px}
+
+/* urgency: stopped on you now, soon, or when you get to it */
+.sm-need.u-now .sm-dot{background:var(--err);box-shadow:0 0 0 3px var(--err-bg)}
+.sm-need.u-now{background:var(--err-bg)}
+.sm-need.u-now[data-sdk]:hover{background:var(--err-bd)}
+.sm-need.u-soon .sm-dot{background:var(--warn)}
+.sm-need.u-later .sm-dot{background:var(--info)}
+
+.sm-run .sm-dot{background:var(--acc);animation:sm-pulse 2s ease-in-out infinite}
+.sm-run>em.sm-eta{color:var(--acc-lt);font-weight:600}
+.sm-run>em.sm-eta.late{color:var(--warn)}
+.sm-bar{display:block;height:2px;margin-top:4px;border-radius:2px;background:var(--n14);overflow:hidden}
+.sm-bar>i{display:block;height:100%;background:var(--acc)}
+.sm-tasks{display:flex;flex-direction:column;gap:1px;margin-top:3px}
+.sm-task{display:flex;gap:6px;font-size:10.5px;color:var(--dim2);min-width:0}
+.sm-task>span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sm-task>em{flex:none;font-style:normal;font-variant-numeric:tabular-nums}
+.sm-task>em.late{color:var(--warn)}
+
+.sm-done .sm-dot{background:var(--ok)}
+.sm-done .sm-dot.bad,.sm-rec.gave .sm-dot{background:var(--err)}
+.sm-row .bad{color:var(--err)}
+.sm-auto .sm-dot{background:var(--cyan)}
+.sm-rec .sm-dot{background:var(--violet)}
+
+.sm-recap{margin-top:10px;border-top:1px solid var(--hair);padding-top:8px}
+.sm-recap>summary{cursor:pointer;font-size:11px;color:var(--dim);line-height:1.4;list-style:none}
+.sm-recap>summary::-webkit-details-marker{display:none}
+.sm-recap>summary>span{color:var(--violet-lt);font-weight:600}
+.sm-recap[open]>summary{margin-bottom:6px}
+
+.sm-compact .wc-line.sm-need{background:none}
+.sm-compact .wc-line .sm-dot{margin-top:0}
+.sm-compact .wc-line[data-sdk]{cursor:pointer}
+
+@keyframes sm-pulse{50%{opacity:.35}}
+@media (prefers-reduced-motion:reduce){.sm-run .sm-dot{animation:none}}
+
+/* an away page by project: a heading per conductor group (or repo), and the group beside a need */
+.sm-group>b{font-weight:600;color:var(--dim)}
+.sm-group.repo>b{font-weight:500}
+.sm-tag{display:inline-block;margin:0 4px;padding:0 4px;border-radius:4px;background:var(--n9);font-size:10px;color:var(--dim2)}

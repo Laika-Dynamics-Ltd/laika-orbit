@@ -1,0 +1,10 @@
+#!/bin/sh
+# Stands in for the Unity binary and runs Unity on the least busy Laika Orbit machine instead of this
+# Mac (see ../offload.mjs). For scripts that take a Unity path:
+#   UNITY=/path/to/packages/app/bin/unity-offload ./game-check.sh
+# OFFLOAD_ON picks the machine; OFFLOAD_BRING (colon separated) names more outputs to bring back.
+here="$(cd "$(dirname "$0")" && pwd)"
+if [ -n "${OFFLOAD_ON:-}" ]; then
+  exec node "$here/../offload.mjs" unity --on "$OFFLOAD_ON" -- "$@"
+fi
+exec node "$here/../offload.mjs" unity -- "$@"

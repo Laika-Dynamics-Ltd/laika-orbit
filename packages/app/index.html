@@ -2,7 +2,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>Laika Orbit</title>
 <!-- Sets the theme before the first paint, so a chosen theme never flashes Midnight first. -->
-<script>try{var t=localStorage.getItem('1brain:theme');if(t&&t!=='midnight')document.documentElement.dataset.theme=t}catch(e){}</script>
+<script>try{var t=localStorage.getItem('orbit:theme');if(t&&t!=='midnight')document.documentElement.dataset.theme=t}catch(e){}</script>
 <link rel="stylesheet" href="/src/themes.css"/><link rel="stylesheet" href="/src/style.css"/></head>
 <body>
 <header>
@@ -19,6 +19,7 @@
       <div class="tool-pop"><div id="legend"></div></div></div>
     <div class="tool"><button class="tool-btn" type="button" aria-expanded="false"><span>telemetry</span><b id="tool-fps">--</b><i>▾</i></button>
       <div class="tool-pop" id="tele-pop"></div></div>
+    <button class="tool-btn" id="tool-queue" type="button" title="Work queue (⌥⌘Q): what the fleet has been told to do, chat by chat"><span>queue</span><b id="tool-queue-n">--</b></button>
     <button class="tool-btn icon" id="tool-home" type="button" title="Reset view (0)" aria-label="Reset view">⌂</button>
     <div class="tool" id="tool-keys"><button class="tool-btn icon" type="button" aria-expanded="false" title="Shortcuts (?)">?</button>
       <div class="tool-pop right keys">
@@ -34,11 +35,24 @@
         <div><kbd>[</kbd><span>toggle left column</span></div>
         <div><kbd>]</kbd><span>toggle right column</span></div>
         <div><kbd>\</kbd><span>graph only</span></div>
+        <div><kbd>k</kbd><span>knowledge ring (back from the browser)</span></div>
         <div><kbd>i</kbd><span>index settings</span></div>
         <div><kbd>⌘</kbd><kbd>,</kbd><span>settings</span></div>
-        <div><kbd>c</kbd><span>agent control</span></div>
+        <div class="lt">panels</div>
+        <div><kbd>c</kbd><span>agents: what needs you</span></div>
+        <div><kbd>r</kbd><span>runs: lanes, artefacts, verdicts, stalls</span></div>
+        <div><kbd>⌥</kbd><kbd>⌘</kbd><kbd>B</kbd><span>fleet: every chat on one line</span></div>
+        <div><kbd>⌥</kbd><kbd>⌘</kbd><kbd>Q</kbd><span>work queue: what each chat does next</span></div>
         <div><kbd>h</kbd><span>history: what happened, across every agent and repo</span></div>
+        <div><kbd>⌥</kbd><kbd>⌘</kbd><kbd>P</kbd><span>profiler: CPU, memory, benchmarks</span></div>
+        <div><kbd>⌥</kbd><kbd>⌘</kbd><kbd>A</kbd><span>autopilot: mode, budget, kill switch</span></div>
+        <div><kbd>⇧</kbd><kbd>⌥</kbd><kbd>⌘</kbd><kbd>C</kbd><kbd>D</kbd><kbd>P</kbd><kbd>Y</kbd><span>autopilot: conductor · decisions · policy · activity</span></div>
+        <div><kbd>esc</kbd><span>close the panel on top</span></div>
+        <div><kbd>g</kbd><span>Mission Control</span></div>
+        <div><kbd>v</kbd><span>Showreel Studio</span></div>
         <div><kbd>b</kbd><span>browser (tabs, one profile per account)</span></div>
+        <div><kbd>t</kbd><span>databases: Supabase projects, their schemas and raw SQL (tables)</span></div>
+        <div><kbd>m</kbd><span>floating player: YouTube music and video, dragged anywhere</span></div>
         <div><kbd>J</kbd><span>toggle JARVIS layer</span></div>
         <div><kbd>p</kbd><span>toggle node previews</span></div>
         <div class="lt">graph</div>
@@ -52,6 +66,10 @@
         <div><kbd>f</kbd><span>frame the selected node</span></div>
         <div><kbd>click</kbd><span>open a node · double-click flies to it</span></div>
         <div><kbd>s</kbd><span>sessions (tap)</span></div>
+        <div class="lt">claude</div>
+        <div><kbd>⌥</kbd><kbd>⌘</kbd><kbd>O</kbd><span>chat library: every Claude chat, to search, pin, archive or delete</span></div>
+        <div><kbd>⌥</kbd><kbd>⌘</kbd><kbd>A</kbd><span>autopilot: the mode, the fleet, what waits on you</span></div>
+        <div><kbd>⇧</kbd><kbd>⌥</kbd><kbd>⌘</kbd><kbd>A</kbd><span>kill switch: the conductor stops sending, now</span></div>
       </div></div>
   </nav>
   <div class="status" id="hdr"></div>

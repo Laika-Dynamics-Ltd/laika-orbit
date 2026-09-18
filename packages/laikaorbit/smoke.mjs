@@ -1,9 +1,9 @@
 /**
- * Installs the packed `1brain` tarball into an empty project, the way npm users get it, and runs it
+ * Installs the packed `laikaorbit` tarball into an empty project, the way npm users get it, and runs it
  * against a small corpus: index, recall, lint, and an MCP session over stdio (initialize, list the
  * tools, call recall). Fails loudly on the first thing that doesn't work.
  *
- *   pnpm --filter 1brain smoke
+ *   pnpm --filter laikaorbit smoke
  */
 import { execFileSync, spawn } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
@@ -12,7 +12,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
-const WORK = mkdtempSync(join(tmpdir(), '1brain-smoke-'))
+const WORK = mkdtempSync(join(tmpdir(), 'laikaorbit-smoke-'))
 const sh = (cmd, args, cwd) => execFileSync(cmd, args, { cwd, encoding: 'utf8', env: { ...process.env, BRAIN_ROOT: '' } })
 const ok = (cond, what) => {
   if (!cond) throw new Error(`smoke: ${what}`)
@@ -30,7 +30,7 @@ try {
   mkdirSync(app)
   writeFileSync(join(app, 'package.json'), '{"name":"smoke","private":true}')
   sh('npm', ['install', '--no-audit', '--no-fund', '--silent', join(WORK, tgz)], app)
-  const bin = join(app, 'node_modules/.bin/1brain')
+  const bin = join(app, 'node_modules/.bin/laikaorbit')
 
   // a corpus with a router file pointing at a note
   const corpus = join(WORK, 'corpus')
@@ -67,7 +67,7 @@ try {
     return replies.get(id)
   }
   send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'smoke', version: '0' } } })
-  ok((await reply(1)).result?.serverInfo?.name === '1brain', 'MCP initialize answers as 1brain')
+  ok((await reply(1)).result?.serverInfo?.name === 'laikaorbit', 'MCP initialize answers as laikaorbit')
   send({ jsonrpc: '2.0', method: 'notifications/initialized' })
   send({ jsonrpc: '2.0', id: 2, method: 'tools/list' })
   const tools = (await reply(2)).result.tools.map((t) => t.name).sort()

@@ -13,7 +13,7 @@ document.body.dataset.part = part ?? ''
 
 // a theme picked in the main window follows here
 addEventListener('storage', (e) => {
-  if (e.key === '1brain:theme') applyTheme(e.newValue ?? 'midnight')
+  if (e.key === 'orbit:theme') applyTheme(e.newValue ?? 'midnight')
 })
 
 if (part === 'claude') {

@@ -55,8 +55,8 @@ describe('SourcedStore', () => {
   let root = ''
   let extra = ''
   beforeAll(async () => {
-    root = await mkdtemp(join(tmpdir(), '1brain-root-'))
-    extra = await mkdtemp(join(tmpdir(), '1brain-extra-'))
+    root = await mkdtemp(join(tmpdir(), 'orbit-root-'))
+    extra = await mkdtemp(join(tmpdir(), 'orbit-extra-'))
     await mkdir(join(root, 'notes/deep/deeper'), { recursive: true })
     await writeFile(join(root, 'notes/a.md'), 'alpha zebra')
     await writeFile(join(root, 'notes/skip.log'), 'noise')

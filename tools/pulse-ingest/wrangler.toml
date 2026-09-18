@@ -1,0 +1,16 @@
+name = "laika-pulse"
+main = "worker.js"
+compatibility_date = "2026-01-01"
+
+# The dashboard's read token. Set it as a secret, never here:
+#   wrangler secret put PULSE_READ_TOKEN
+# Optional: restrict who may post events at all (leave unset for an open opt-in endpoint).
+#   wrangler secret put PULSE_WRITE_TOKEN
+
+[[d1_databases]]
+binding = "DB"
+database_name = "laika-pulse"
+database_id = "<run: wrangler d1 create laika-pulse>"
+
+[observability]
+enabled = true

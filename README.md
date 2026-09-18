@@ -3,7 +3,7 @@
 **Your whole working day in one window: a live map of everything you know, Claude Code chats
 side by side, a real browser, and your inbox and calendar, all running on your own machine.**
 
-Laika Orbit is powered by **1brain**, a retrieval engine that answers questions about your
+Laika Orbit is powered by **Laika Orbit recall**, a retrieval engine that answers questions about your
 files without calling a model. Ask a question and you get back the exact section that answers
 it and the file it came from, in about a millisecond, with 97.8% fewer tokens than an agent
 grepping and reading whole files ([`bench/RESULTS.md`](bench/RESULTS.md)).
@@ -19,7 +19,8 @@ grepping and reading whole files ([`bench/RESULTS.md`](bench/RESULTS.md)).
 | **Claude panel** | Claude Code chats in VS Code-style groups: split, drag, or four in a grid. Chats for a single repo or a whole project folder, a task track beside each chat, sub-agent cards, several Claude accounts at once, and chats that come back by themselves after a crash or restart. |
 | **Browser** | `b` opens real Chromium tabs, one storage profile per account, so work and client logins sit side by side. Chrome-style tabs, and Chrome extensions from the Web Store (desktop app only). |
 | **Widgets** | Inbox (Gmail), calendar (any iCal feed), agents, routines and skills on the side rails. Each is a JSON file in `brain/widgets/` you can edit or add to. |
-| **1brain** | The engine underneath: an inverted index over your folders, seven pure steps, no model call. Also a CLI and an MCP server, so Claude Code calls `recall` instead of grepping. |
+| **Adoption pulse** | `/pulse`: everyone arriving at the project as a 3D node network — public repo numbers, and opted-in anonymous usage. The window and its rail button appear only on the maintainer's machine; reporting is off until a user turns it on. See [PRIVACY.md](PRIVACY.md). |
+| **Laika Orbit recall** | The engine underneath: an inverted index over your folders, seven pure steps, no model call. Also a CLI and an MCP server, so Claude Code calls `recall` instead of grepping. |
 
 ## Requirements
 
@@ -82,8 +83,29 @@ gitignored, so pulling updates never conflicts with your setup.
   turns that off.
 - **Chats ask before acting.** New chats start in Claude Code's default permission mode; you
   choose when to allow more.
+- **Usage reporting is opt-in and anonymous.** Off until you turn it on, and declining never
+  creates an identifier. It sends daily counts of coarse actions (`recall_run: 40`) and never a
+  path, query, file, prompt, URL or IP. Turning it off destroys the id and the queue.
+  [PRIVACY.md](PRIVACY.md) lists the whole payload.
 
 Found a vulnerability? See [SECURITY.md](SECURITY.md).
+
+## Other machines
+
+Claude sessions and terminals can run on other machines on your network, so their builds and
+tests don't load your Mac. `pnpm node:bundle` builds one archive per platform (Linux x64 and arm64
+by default; `darwin-arm64` and `darwin-x64` on request) in `tools/node-bundle/dist/`. Copy one to
+the machine, then `tar -xzf` it and run `./install.sh` as the user the sessions should run as. It
+bundles Node and Claude Code, installs the agent host as a user service listening on loopback only,
+and lets this Mac's Laika Orbit key (`~/.laika/node/`) open an SSH tunnel to it and nothing else.
+See [`tools/node-bundle/README.txt`](tools/node-bundle/README.txt).
+
+`packages/app/offload.mjs` sends a command to the least busy machine as if it ran here: it
+copies the project over (rsync, without Unity's `Library`), runs the command there, streams the
+output back, brings its result files home and exits with its code. For Unity,
+`offload unity -- -nographics -runTests -testResults out/tests.xml` runs the project's own Unity
+version and brings the results back. `offload add user@host` adds a machine, `offload machines`
+shows them, `offload discover` lists the ones announcing themselves on the network.
 
 ## How recall works
 
@@ -108,7 +130,7 @@ pointer files that act as a curated index:
 - Rules:     brain/rules/feedback_au_english.md — AU spelling always
 ```
 
-Write descriptions the way a question is phrased. Pointed at a folder with no routers, 1brain is
+Write descriptions the way a question is phrased. Pointed at a folder with no routers, recall is
 a very fast filename and content search; with them, it answers.
 
 ## Packages
@@ -116,11 +138,12 @@ a very fast filename and content search; with them, it answers.
 | | |
 |---|---|
 | **`core`** | The engine: indexer and the seven-step recall path. **Zero runtime dependencies.** |
-| **`cli`** | `1brain index · status · lint · recall · ask` |
+| **`cli`** | `laikaorbit index · status · lint · recall · ask` |
 | **`mcp`** | Three tools over stdio for Claude Code. |
 | **`app`** | The Laika Orbit app: one Node server with Vite, the core API, the Claude chat host and the feeds. |
 | **`shell`** | The Electron desktop app, with native browser tabs. `pnpm shell`; `pnpm shell:app` builds a macOS app into `/Applications` and adds it to the Dock. |
 | **`graph`** | The renderer's scratch package. Not shipped. |
+| **`tools/pulse-ingest`** | The `/pulse` ingest endpoint: a Cloudflare Worker and D1 schema. The only server-side piece, and optional. |
 
 ## Development
 

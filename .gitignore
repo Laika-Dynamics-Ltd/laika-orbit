@@ -5,7 +5,7 @@ dist/
 *.tsbuildinfo
 
 # extraction cache — regenerable from source documents
-.1brain/
+.orbit/
 
 # gauntlet: keep the bar, the definition and the results; drop the working copies,
 # the per-round captures and the voided run (hundreds of MB of PNGs)
@@ -37,6 +37,8 @@ packages/graph/public/brain.json
 # brain/widgets/_<id>.template.json
 brain/widgets/email.json
 brain/widgets/calendar.json
+# the summary card (chat titles, what they did), written by the agent host's summary routine
+brain/widgets/summary.json
 
 # any env file except the example
 .env
@@ -48,8 +50,8 @@ brain/widgets/calendar.json
 .gauntlet/champion2/
 packages/graph/undefined/
 
-# built copy of the root LICENSE for the published 1brain package
-packages/1brain/LICENSE
+# built copy of the root LICENSE for the published laikaorbit package
+packages/laikaorbit/LICENSE
 
 # written by the app for each user; the defaults apply until then
 brain/index.config.json

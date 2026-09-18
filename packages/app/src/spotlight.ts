@@ -154,13 +154,25 @@ export function createSpotlight(host: SpotlightHost) {
       })
       .sort((a, b) => b.m.score - a.m.score || b.g.count - a.g.count)
       .slice(0, query ? 4 : 5)
+    // A command is a thing in the app asked for by name, so it outranks a file that merely shares
+    // the name: "agents" is the Agents panel before it is AGENTS.md. A whole word of its terms
+    // counts as a real match too — "progress" is Runs — and a looser one still lists it, last.
+    const word = query.toLowerCase()
     const cmds = host
       .commands()
       .flatMap((c) => {
-        const m =
-          fuzzy(query, c.title) ??
-          (c.terms && fuzzy(query, c.terms) ? { score: 1, hits: [] } : null)
-        return m ? [{ c, m }] : []
+        const t = fuzzy(query, c.title)
+        // exactly its name, or its name after "Feature: " — the strongest match there is
+        const exact = [c.title, c.title.split(': ').pop()].some((x) => x?.toLowerCase() === word)
+        const inTerms =
+          !!c.terms && word.length > 2 && c.terms.toLowerCase().split(/\s+/).includes(word)
+        const score = Math.max(
+          exact ? 200 : -1e9,
+          t ? t.score + 20 : -1e9,
+          inTerms ? 160 : -1e9,
+          c.terms && fuzzy(query, c.terms) ? 1 : -1e9,
+        )
+        return score > -1e9 ? [{ c, m: { score, hits: t?.hits ?? [] } }] : []
       })
       .sort((a, b) => b.m.score - a.m.score)
       .slice(0, query ? 5 : 8)

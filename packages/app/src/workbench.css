@@ -14,7 +14,15 @@
   padding: 10px 0 12px;
   border-right: 1px solid var(--n13);
   background: var(--n2);
+  /* a dozen panels and their views can outgrow a short screen; the rail scrolls rather than
+     hiding its foot, and the scrollbar stays out of the way until it is used */
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
 }
+#wbn::-webkit-scrollbar { width: 0 }
+/* developer tools (devfeatures.ts) are off the rail unless Settings → App → Developer is on */
+body:not(.dev-features) #wbn [data-dev] { display: none }
 #wbn button {
   position: relative;
   width: 44px;
@@ -60,14 +68,46 @@
 .wbn-badge[hidden] { display: none }
 #wbn button[hidden] { display: none }
 
+/* ---------- groups: a run of buttons the panel system fills ---------- */
+/* `display: contents` so a slot's buttons are laid out by the rail itself, not by the slot */
+.wbn-slot { display: contents }
+.wbn-slot:empty { display: none }
+
+/* a panel that is a view of another one: narrower, indented, and quiet until you want it */
+#wbn button.wbn-sub {
+  width: 38px;
+  padding: 5px 0 4px;
+  font-size: 8.5px;
+  color: var(--n21);
+  align-self: flex-end;
+  margin-right: 6px;
+}
+#wbn button.wbn-sub svg { width: 15px; height: 15px }
+#wbn button.wbn-sub.on { color: var(--n34) }
+#wbn button.wbn-sub.on::before { left: -50px; top: 6px; bottom: 6px }
+
+/* the chevron that folds a panel's views out into the rail */
+.wbn-more {
+  position: absolute;
+  left: 1px;
+  top: 2px;
+  display: grid;
+  place-items: center;
+  width: 12px;
+  height: 12px;
+  border-radius: 4px;
+  color: var(--n21);
+  transition: transform 0.14s, color 0.12s;
+}
+.wbn-more:hover { color: var(--n34); background: var(--n13) }
+.wbn-more[data-open='true'] { transform: rotate(180deg); color: var(--n30) }
+
 body.has-wbn main { margin-left: 56px }
 body.has-wbn #ss:not(.dock) { left: 56px }
-/* History covers the page but not the rail or the header, like Claude and agent control, so
-   the button that opened it can close it */
-body.has-wbn #hist { top: 52px; left: 56px }
 @media (max-width: 700px) {
   #wbn { width: 44px }
   #wbn button { width: 36px }
+  #wbn button.wbn-sub { width: 30px; margin-right: 4px }
   #wbn button span { display: none }
   .wbn-badge { top: 1px; right: 0 }
   body.has-wbn main { margin-left: 44px }

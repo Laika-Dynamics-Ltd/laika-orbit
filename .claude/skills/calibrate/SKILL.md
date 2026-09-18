@@ -16,7 +16,7 @@ This is the **I** and **T** of Build → Integrate → Tune.
 At the end of a session in which any of these happened:
 
 - you corrected the agent on something it should have known
-- a `1brain recall` returned the wrong file, or the right file with a low margin
+- a `laikaorbit recall` returned the wrong file, or the right file with a low margin
 - a new file, skill or rule was created that nothing points at
 - a decision was made that isn't written down anywhere
 

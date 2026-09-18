@@ -16,6 +16,12 @@
  *   /api/control/moments    ?hours=12|24|48[&project=] — work, commits and notes as one history
  *   /api/control/ring       sessions and loose-end repos, addressed as index paths for the ring
  *   /api/control/open       POST-free action: open a known path in Finder/editor/terminal
+ *   /api/control/library    every chat, paged and filtered (see chat-library.mjs):
+ *                           ?q=&project=&account=&state=here|other&pinned=1&archived=1|only
+ *                           &sort=updated|created|title&limit=&cursor=
+ *   /api/control/library/search  ?q=[&archived=1][&cursor=] — words inside messages, a bounded step at a time
+ *   /api/control/library/meta    GET the store · POST { id, patch } · POST { migrate: { names, colours } }
+ *   /api/control/library/delete  POST { id } — transcript, brief and entry to the Trash
  */
 import { execFile, spawn } from 'node:child_process'
 import { openSync, readFileSync, rmSync, statSync } from 'node:fs'
@@ -24,7 +30,11 @@ import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { loadIndexConfig, sourceDir } from '@laika/core'
+import { createNodeRouter, LOCAL } from './nodes.mjs'
+import { canRun, capsOf, createTunnelPool, discover, openTunnel, parseAddress, readMachines, remoteDir, routesOf, saveMachineState, syncDown, syncUp, writeMachines } from './machines.mjs'
+import { isWindows, openGate, winHealth } from './windows.mjs'
 import { promisify } from 'node:util'
+import { deleteChat, listChats, migrateEntries, patchEntry, readLibrary, scanChats, searchChats } from './chat-library.mjs'
 
 const run = promisify(execFile)
 const HOME = homedir()
@@ -208,7 +218,7 @@ const ago = (ms) =>
  *
  * Running a dozen agents across a dozen repos means a dozen dev servers, and "what is on 5200,
  * and is it mine" is a question nothing else in the app can answer — you go to the terminal for
- * it. The cwd is the useful half: a port number says nothing, `laika-1brain` says everything.
+ * it. The cwd is the useful half: a port number says nothing, the repo's folder name says everything.
  *
  * Kept to processes that are plausibly yours — a node/bun/python/ruby runtime, or anything
  * whose working directory sits under a dev root. Without that filter this is a list of macOS
@@ -575,7 +585,7 @@ async function activity() {
 }
 
 /** Sessions attributed to the git repo that contains their folder, so a session started in
- * packages/app counts towards laika-1brain rather than a project of its own. */
+ * packages/app counts towards its repo rather than a project of its own. */
 async function attributedSessions() {
   const rs = await repos()
   const home = (cwd) =>
@@ -883,6 +893,12 @@ const minsLabel = (iso) => {
  * Built at read time (like brainstat) rather than written to brain/widgets/, so it is never
  * stale and never churns a tracked file.
  */
+/** this Mac's hosted chats, for naming who a heavy process belongs to (feeds/loadwatch.mjs) */
+export async function localChats() {
+  const r = await nodes.call(LOCAL, '/sessions', { signal: AbortSignal.timeout(5000) })
+  return r.ok ? r.json() : []
+}
+
 export async function agentsWidget() {
   const all = await attributedSessions()
   const pick = (st) => all.filter((s) => s.state === st)
@@ -1067,58 +1083,170 @@ async function allowedCwds() {
   return new Set([...rs.map((r) => r.path), ...ps.map((p) => p.path), ...ss.map((s) => s.cwd).filter(Boolean)])
 }
 
+/**
+ * Machines that run chats and terminals (see nodes.mjs): this Mac, and the machines listed in
+ * brain/nodes.local.json (machines.mjs), each reached through an SSH tunnel kept open here.
+ *
+ * A chat on another machine works in that machine's copy of the repo (~/orbit-work/<name-hash>),
+ * copied over when the chat starts. The page never sees the copy's path: repo paths in what comes
+ * back are rewritten to the repo's path on this Mac, and paths in what the page sends are
+ * rewritten the other way, so workspaces, tool cards and file links work as for a local chat.
+ * What the chat changes stays on the machine until it is copied back (POST nodes/pull).
+ */
+const tunnels = createTunnelPool()
+process.once('exit', () => tunnels.closeAll())
+const machineNamed = (name) => readMachines().find((m) => m.name === name) ?? null
+const nodes = createNodeRouter({
+  // Windows machines run jobs only (windows.mjs), not chats or terminals: no agent host to reach
+  ids: () => [LOCAL, ...readMachines().filter((m) => !isWindows(m)).map((m) => m.name)],
+  reach: async (node) => {
+    if (node === LOCAL) {
+      const st = await agentHost()
+      return { base: `http://127.0.0.1:${st.port}`, token: st.token }
+    }
+    const m = machineNamed(node)
+    if (!m) throw new Error(`no machine named ${node}`)
+    return tunnels.get(m)
+  },
+  forget: forgetNode,
+})
+function forgetNode(node) {
+  if (node === LOCAL) return forgetHost()
+  tunnels.forget(node)
+  workRoots.delete(node)
+}
+
+/** each machine's work folder, as its host reports it */
+const workRoots = new Map()
+async function workRoot(node) {
+  if (!workRoots.has(node)) {
+    const r = await nodes.call(node, '/health?machine=1', { signal: AbortSignal.timeout(10_000) })
+    const work = (await r.json()).machine?.work
+    if (!work) throw new Error(`${node} does not say where its work folder is: reinstall it from a newer bundle`)
+    workRoots.set(node, work)
+  }
+  return workRoots.get(node)
+}
+
+/** [path on the machine, path here] for every repo this Mac knows */
+async function pathPairs(node) {
+  const work = await workRoot(node)
+  return [...(await allowedCwds())].map((p) => [`${work}/${remoteDir(p)}`, p])
+}
+const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+/**
+ * JSON text with repo paths swapped between a machine's copies and this Mac's repos. A path only
+ * matches whole, so /dev/game never rewrites part of /dev/game-wr.
+ */
+export function swapPaths(text, pairs, toLocal) {
+  let out = text
+  for (const [remote, local] of pairs) {
+    const [from, to] = toLocal ? [remote, local] : [local, remote]
+    const f = JSON.stringify(from).slice(1, -1)
+    if (!out.includes(f)) continue
+    out = out.replace(new RegExp(`${escRe(f)}(?![\\w.-])`, 'g'), () => JSON.stringify(to).slice(1, -1))
+  }
+  return out
+}
+
 async function proxyAgent(sub, url, req, res) {
+  const fail = (code, error) => {
+    res.writeHead(code, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ error }))
+  }
   const writes = req.method !== 'GET'
   if (writes) {
     // same rule as /open: a page on another site can't send this header without a preflight
     const site = req.headers['sec-fetch-site']
-    if (req.headers['x-control'] !== '1' || (site && site !== 'same-origin' && site !== 'none')) {
-      res.writeHead(403, { 'content-type': 'application/json' })
-      return res.end('{"error":"forbidden"}')
-    }
+    if (req.headers['x-control'] !== '1' || (site && site !== 'same-origin' && site !== 'none')) return fail(403, 'forbidden')
   }
+  const [kind, id] = sub.split('/')
+  const owned = kind === 'sessions' || kind === 'terms'
+  const creates = owned && !id && req.method === 'POST'
+  // chats and terminals are found by id; accounts belong to the machine the page names
+  let node = kind === 'accounts' ? url.searchParams.get('node') || LOCAL : LOCAL
   let body
+  let copy = null
   if (writes && req.method !== 'DELETE') {
     const chunks = []
     for await (const c of req) chunks.push(c)
     body = Buffer.concat(chunks)
-    if ((sub === 'sessions' || sub === 'terms') && req.method === 'POST') {
+    if (creates) {
       const b = JSON.parse(body.toString('utf8') || '{}')
-      if (!(await allowedCwds()).has(b.cwd)) {
-        res.writeHead(403, { 'content-type': 'application/json' })
-        return res.end('{"error":"folder is not a known repo"}')
-      }
+      // a chat's terminal opens on the machine the chat runs on
+      node = typeof b.node === 'string' && b.node ? b.node : b.owner ? await nodes.where(String(b.owner)) : LOCAL
+      if (!nodes.has(node)) return fail(400, `unknown machine ${node}`)
+      if (!(await allowedCwds()).has(b.cwd)) return fail(403, 'folder is not a known repo')
+      // a chat on another machine starts from a fresh copy of the repo; its terminal uses that copy
+      if (node !== LOCAL && kind === 'sessions') copy = b.cwd
+    }
+    // away mode may start a conductor in a folder the page names: the same rule holds
+    else if (sub === 'away' && req.method === 'POST') {
+      const b = JSON.parse(body.toString('utf8') || '{}')
+      if (b.cwd != null && !(await allowedCwds()).has(b.cwd)) return fail(403, 'folder is not a known repo')
     }
   }
   let upstream
+  let pairs = null
   try {
-    const st = await agentHost()
+    if (owned && !id && req.method === 'GET') {
+      const items = await nodes.list(kind)
+      const byNode = new Map()
+      for (const x of items) if (x.node !== LOCAL && !byNode.has(x.node)) byNode.set(x.node, await pathPairs(x.node).catch(() => []))
+      const out = items.map((x) => (x.node === LOCAL ? x : JSON.parse(swapPaths(JSON.stringify(x), byNode.get(x.node), true))))
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+      return res.end(JSON.stringify(out))
+    }
+    if (owned && id) node = await nodes.where(id)
+    if (node !== LOCAL) {
+      pairs = await pathPairs(node)
+      if (copy) await syncUp(machineNamed(node), copy, remoteDir(copy))
+      if (body?.length) body = Buffer.from(swapPaths(body.toString('utf8'), pairs, false))
+    }
     // event streams stay open; everything else must answer within 20s or fail visibly
     const stream = /\/events$/.test(sub)
-    upstream = await fetch(`http://127.0.0.1:${st.port}/${sub}${url.search}`, {
+    upstream = await nodes.call(node, `/${sub}${url.search}`, {
       method: req.method,
-      headers: { 'x-agent-token': st.token, 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json' },
       body,
       ...(stream ? {} : { signal: AbortSignal.timeout(20_000) }),
     })
   } catch (e) {
-    forgetHost()
-    res.writeHead(503, { 'content-type': 'application/json' })
-    return res.end(JSON.stringify({ error: `The Claude host did not answer: ${String(e?.message ?? e).slice(0, 120)}` }))
+    const who = node === LOCAL ? 'The Claude host' : `${node}`
+    return fail(503, `${who} did not answer: ${String(e?.message ?? e).slice(0, 160)}`)
   }
-  res.writeHead(upstream.status, {
-    'content-type': upstream.headers.get('content-type') ?? 'application/json',
-    'cache-control': 'no-store',
-  })
+  const local = (text) => (pairs ? swapPaths(text, pairs, true) : text)
+  if (creates && upstream.ok) {
+    // the new chat or terminal is remembered on its machine, and says which one it is on
+    const made = JSON.parse(local(await upstream.text()))
+    nodes.remember(made.id, node)
+    res.writeHead(upstream.status, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+    return res.end(JSON.stringify({ ...made, node }))
+  }
+  if (sub === `${kind}/${id}` && owned && req.method === 'DELETE' && upstream.ok) nodes.drop(id)
+  const type = upstream.headers.get('content-type') ?? 'application/json'
+  res.writeHead(upstream.status, { 'content-type': type, 'cache-control': 'no-store' })
   if (!upstream.body) return res.end()
+  if (pairs && !type.startsWith('text/event-stream')) return res.end(local(await upstream.text()))
   const reader = upstream.body.getReader()
   req.on('close', () => reader.cancel().catch(() => {}))
+  const dec = new TextDecoder()
+  let buf = ''
   for (;;) {
     const { done, value } = await reader.read().catch(() => ({ done: true }))
     if (done) break
-    res.write(value)
+    if (!pairs) {
+      res.write(value)
+      continue
+    }
+    // events from another machine are rewritten whole, a frame at a time
+    buf += dec.decode(value, { stream: true })
+    const cut = buf.lastIndexOf('\n\n')
+    if (cut < 0) continue
+    res.write(local(buf.slice(0, cut + 2)))
+    buf = buf.slice(cut + 2)
   }
-  res.end()
+  res.end(buf ? local(buf) : undefined)
 }
 
 /**
@@ -1152,12 +1280,11 @@ async function agentStream(url, req, res) {
   const ping = setInterval(() => res.write(': ping\n\n'), 15_000)
   req.on('close', finish)
   const one = async ({ id, since }) => {
+    let node = LOCAL
     try {
-      const st = await agentHost()
-      const up = await fetch(`http://127.0.0.1:${st.port}/sessions/${id}/events?since=${since}`, {
-        headers: { 'x-agent-token': st.token },
-        signal: ctl.signal,
-      })
+      node = await nodes.where(id)
+      const pairs = node === LOCAL ? null : await pathPairs(node)
+      const up = await nodes.call(node, `/sessions/${id}/events?since=${since}`, { signal: ctl.signal })
       if (up.status === 404) return void res.write(`event: gone\ndata: ${JSON.stringify({ sid: id })}\n\n`)
       if (!up.ok || !up.body) throw new Error(String(up.status))
       const reader = up.body.getReader()
@@ -1175,11 +1302,12 @@ async function agentStream(url, req, res) {
           const event = /^event: (.+)$/m.exec(frame)?.[1]
           const data = /^data: (\{.+)$/m.exec(frame)?.[1]
           if (!data || over) continue
-          res.write(`${event ? `event: ${event}\n` : ''}data: ${tag}${data.slice(1)}\n\n`)
+          const text = pairs ? swapPaths(data, pairs, true) : data
+          res.write(`${event ? `event: ${event}\n` : ''}data: ${tag}${text.slice(1)}\n\n`)
         }
       }
     } catch {
-      if (!over) forgetHost()
+      if (!over) forgetNode(node)
     }
     finish()
   }
@@ -1455,6 +1583,253 @@ async function handleGit(route, url, req, res, json) {
   return json(404, { error: 'not found' })
 }
 
+// ------------------------------------------------------------------ library ----
+/**
+ * Chats open in this app's host, by Claude session id -> the host's chat id. Asks the host when
+ * one is running (never starts one just to ask), and otherwise reads the list it keeps on disk
+ * of chats it will bring back, so a stopped host still protects its chats from delete.
+ */
+async function hostChats() {
+  const out = new Map()
+  const st = readHostState()
+  if (st) {
+    try {
+      const r = await fetch(`http://127.0.0.1:${st.port}/sessions`, { headers: { 'x-agent-token': st.token }, signal: AbortSignal.timeout(3000) })
+      if (r.ok) {
+        for (const x of await r.json()) if (x.sdkSessionId && x.state !== 'closed') out.set(x.sdkSessionId, x.id)
+        return out
+      }
+    } catch {}
+  }
+  try {
+    const rows = JSON.parse(await readFile(join(HOME, '.laika', `agent-sessions-${process.env.PORT || 5200}.json`), 'utf8'))
+    for (const x of rows) if (x?.sdkSessionId) out.set(x.sdkSessionId, x.id ?? x.sdkSessionId)
+  } catch {}
+  return out
+}
+
+/** every transcript's title, rescanned at most every few seconds however often the page asks */
+const libraryRows = () => fresh('library-rows', 3000, () => scanChats(projectRoots()))
+
+async function libraryPage(params, only) {
+  const [all, library, running, rs] = await Promise.all([libraryRows(), readLibrary(), hostChats(), repos().catch(() => [])])
+  const repoOf = (cwd) => {
+    const r = rs.filter((x) => cwd === x.path || cwd.startsWith(`${x.path}/`)).sort((a, b) => b.path.length - a.path.length)[0]
+    return r ? { repo: r.name, repoPath: r.path } : undefined
+  }
+  const rows = only ? all.filter((x) => only(x, library)) : all
+  return listChats({ rows, library, running, repoOf, params })
+}
+
+async function handleLibrary(route, url, req, json) {
+  const writes = req?.method === 'POST'
+  let body = {}
+  if (writes) {
+    const site = req.headers['sec-fetch-site']
+    if (req.headers['x-control'] !== '1' || (site && site !== 'same-origin' && site !== 'none')) return json(403, { error: 'forbidden' })
+    const chunks = []
+    for await (const c of req) chunks.push(c)
+    try {
+      body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}')
+    } catch {
+      return json(400, { error: 'bad json' })
+    }
+  } else if (req && req.method !== 'GET' && req.method !== 'HEAD') return json(405, { error: 'method not allowed' })
+
+  if (route === '' && !writes) return json(200, await libraryPage(url.searchParams))
+
+  if (route === 'search' && !writes) {
+    // the chats the list would show: archived ones only when asked
+    const arch = url.searchParams.get('archived') ?? ''
+    const [rows, library] = await Promise.all([libraryRows(), readLibrary()])
+    const shown = rows.filter((x) => (arch === 'only' ? library[x.id]?.archived : arch === '1' || !library[x.id]?.archived))
+    const limit = Math.max(1, Math.min(100, Number(url.searchParams.get('limit')) || 40))
+    const r = await searchChats({ rows: shown, q: url.searchParams.get('q') ?? '', skip: Number(url.searchParams.get('cursor')) || 0, maxHits: limit })
+    const ids = new Set(r.hits.map((h) => h.id))
+    const page = await libraryPage(new URLSearchParams({ archived: '1', limit: '200' }), (x) => ids.has(x.id))
+    const byId = new Map(page.items.map((x) => [x.id, x]))
+    return json(200, { ...r, hits: r.hits.filter((h) => byId.has(h.id)).map((h) => ({ ...byId.get(h.id), ...h })) })
+  }
+
+  if (route === 'meta') {
+    if (!writes) return json(200, await readLibrary())
+    if (body.migrate) {
+      const r = await migrateEntries(body.migrate)
+      return json(200, r.library)
+    }
+    const id = String(body.id ?? '')
+    const patch = body.patch && typeof body.patch === 'object' ? body.patch : {}
+    try {
+      return json(200, { id, entry: await patchEntry(id, patch) })
+    } catch (e) {
+      return json(400, { error: String(e?.message ?? e) })
+    }
+  }
+
+  if (route === 'delete' && writes) {
+    // a transcript written in the last two minutes may belong to a Claude Code still running in a terminal
+    const r = await deleteChat({ id: String(body.id ?? ''), roots: projectRoots(), running: await hostChats(), quietMs: 120_000 })
+    if (r.code === 200) {
+      CACHE.delete('library-rows')
+      CACHE.delete('sessions')
+      return json(200, { ok: true, trashed: r.trashed.length })
+    }
+    return json(r.code, { error: r.error })
+  }
+  return json(404, { error: 'no such library route' })
+}
+
+// ---------------------------------------------------------------- machines ----
+/**
+ * The Machines settings: this Mac and every other machine, online or not, how busy, what Unity
+ * versions it has and what jobs it runs; adding one by address or from the ones announcing
+ * themselves; stopping a job; and copying a chat's changes back from its machine.
+ *   GET    nodes                       every machine with its state and jobs
+ *   GET    nodes/discover              machines on the network that are not added
+ *   POST   nodes            {address, name?}   checks it answers, then adds it
+ *   DELETE nodes/<name>
+ *   DELETE nodes/<name>/jobs/<id>      stop a job
+ *   POST   nodes/pull       {session}  copy a chat's changes back to its repo here
+ */
+/**
+ * every job still running (a long Unity run must not drop out behind a stream of short encodes),
+ * then the newest finished ones; not the offload tools' own housekeeping
+ */
+export function jobsWorthShowing(jobs, finished = 12) {
+  const real = jobs.filter((j) => !(String(j.cmd).split('/').pop() === 'rm' && j.dir === '.')).sort((a, b) => b.startedAt - a.startedAt)
+  return [...real.filter((j) => j.state === 'running'), ...real.filter((j) => j.state !== 'running').slice(0, finished)]
+}
+
+/**
+ * A Windows machine's state for the machines card: its health and recent jobs, over ssh to its gate.
+ * Asked at most every 15 seconds whatever the card's polling, since each ask starts PowerShell there;
+ * the last answer is served meanwhile.
+ */
+const WIN_EVERY_MS = 15_000
+const winCache = new Map()
+function windowsStatus(m) {
+  const c = winCache.get(m.name)
+  const fresh = c && Date.now() - c.at < WIN_EVERY_MS
+  if (!fresh && !c?.pending) {
+    const pending = winHealth(m)
+      .then((h) => ({ id: m.name, online: true, sessions: 0, machine: h, jobs: h.recent ?? [] }))
+      .catch((e) => ({ id: m.name, online: false, error: String(e?.message ?? e).slice(0, 160) }))
+      .then((row) => {
+        winCache.set(m.name, { at: Date.now(), row })
+        return row
+      })
+    winCache.set(m.name, { at: c?.at ?? 0, row: c?.row, pending })
+    if (!c?.row) return pending
+  }
+  return c?.row ?? winCache.get(m.name).pending
+}
+
+async function handleNodes(parts, req, json) {
+  if (req.method !== 'GET') {
+    const site = req.headers['sec-fetch-site']
+    if (req.headers['x-control'] !== '1' || (site && site !== 'same-origin' && site !== 'none')) return json(403, { error: 'forbidden' })
+  }
+  const body = async () => {
+    const chunks = []
+    for await (const c of req) chunks.push(c)
+    try {
+      return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}')
+    } catch {
+      return {}
+    }
+  }
+  const list = readMachines()
+  if (!parts.length && req.method === 'GET') {
+    const [status, wins] = await Promise.all([nodes.status(), Promise.all(list.filter(isWindows).map(windowsStatus))])
+    const rows = await Promise.all(
+      [...status, ...wins].map(async (s) => {
+        const m = list.find((x) => x.name === s.id)
+        const jobs = s.jobs
+          ? s.jobs
+          : s.online && s.id !== LOCAL
+            ? await nodes
+                .call(s.id, '/jobs', { signal: AbortSignal.timeout(5000) })
+                .then((r) => r.json())
+                .catch(() => [])
+            : []
+        const caps = m && s.online ? capsOf(m, s.machine ?? {}) : null
+        return {
+          ...s,
+          local: s.id === LOCAL,
+          name: s.id === LOCAL ? 'This Mac' : s.id,
+          os: s.id === LOCAL ? 'mac' : (m?.os ?? 'linux'),
+          address: m ? `${m.user}@${m.host}${m.port && m.port !== 22 ? `:${m.port}` : ''}` : null,
+          jobs: Array.isArray(jobs) ? jobsWorthShowing(jobs) : [],
+          caps,
+          canRun: caps ? canRun(caps) : [],
+        }
+      }),
+    )
+    // what goes where now, for the card and for the load watcher and chats (~/.laika/machines.json)
+    const remote = rows.filter((r) => !r.local).map((r) => ({ name: r.id, os: r.os, online: r.online, caps: r.caps, jobs: r.machine?.jobs ?? 0 }))
+    saveMachineState(remote)
+    const routes = routesOf(remote)
+    for (const r of rows) r.gets = r.local ? [] : [routes.gpu === r.id && 'GPU work', routes.cpuAll.includes(r.id) && 'CPU work'].filter(Boolean)
+    return json(200, rows)
+  }
+  if (parts[0] === 'discover' && req.method === 'GET') {
+    const known = new Set(list.map((m) => `${m.user}@${m.host}`))
+    return json(200, (await discover()).filter((d) => !known.has(`${d.user}@${d.host}`)))
+  }
+  if (!parts.length && req.method === 'POST') {
+    const b = await body()
+    const addr = parseAddress(b.address ?? '')
+    if (!addr) return json(400, { error: 'Type it as user@host, like joe@192.168.1.20' })
+    let h
+    try {
+      const t = await openTunnel({ ...addr, name: addr.host })
+      h = await (await t.call('/health?machine=1', { signal: AbortSignal.timeout(10_000) })).json()
+      t.close()
+    } catch (e) {
+      return json(502, { error: String(e?.message ?? e) })
+    }
+    const name =
+      String(b.name || h.machine?.hostname || addr.host)
+        .split('.')[0]
+        .replace(/[^\w-]+/g, '-')
+        .slice(0, 40) || 'machine'
+    if (name === LOCAL) return json(400, { error: 'That name is taken by this Mac' })
+    writeMachines([...list.filter((m) => m.name !== name && !(m.user === addr.user && m.host === addr.host)), { name, ...addr }])
+    return json(200, { name })
+  }
+  const m = list.find((x) => x.name === parts[0])
+  if (parts.length === 1 && req.method === 'DELETE') {
+    if (!m) return json(404, { error: 'no such machine' })
+    writeMachines(list.filter((x) => x !== m))
+    forgetNode(m.name)
+    return json(200, { ok: true })
+  }
+  if (m && parts[1] === 'jobs' && parts[2] && req.method === 'DELETE') {
+    if (isWindows(m)) {
+      const r = await openGate(m).call(`/jobs/${encodeURIComponent(parts[2])}`, { method: 'DELETE' })
+      return json(r.status, await r.json())
+    }
+    const r = await nodes.call(m.name, `/jobs/${encodeURIComponent(parts[2])}`, { method: 'DELETE', signal: AbortSignal.timeout(10_000) })
+    return json(r.status, await r.json())
+  }
+  if (parts[0] === 'pull' && req.method === 'POST') {
+    const id = String((await body()).session ?? '')
+    const node = await nodes.where(id)
+    if (node === LOCAL) return json(400, { error: 'That chat runs on this Mac' })
+    const chat = (await nodes.list('sessions')).find((x) => x.id === id)
+    if (!chat) return json(404, { error: 'no such chat' })
+    const here = (await pathPairs(node)).find(([remote]) => remote === chat.cwd)?.[1]
+    if (!here) return json(404, { error: 'this chat’s repo is not one this Mac knows' })
+    try {
+      const files = await syncDown(machineNamed(node), here, remoteDir(here))
+      return json(200, { files, cwd: here, machine: node })
+    } catch (e) {
+      return json(502, { error: String(e?.message ?? e) })
+    }
+  }
+  return json(404, { error: 'no such machines route' })
+}
+
 // ------------------------------------------------------------------- routes ----
 /** Handle /api/control/*; returns true when it answered. */
 export async function handleControl(url, res, req) {
@@ -1481,6 +1856,8 @@ export async function handleControl(url, res, req) {
     )
   }
   if (route.startsWith('git/')) return handleGit(route.slice(4), url, req, res, json)
+  if (route === 'library' || route.startsWith('library/')) return handleLibrary(route.slice('library/'.length), url, req, json)
+  if (route === 'nodes' || route.startsWith('nodes/')) return handleNodes(route.split('/').slice(1), req, json)
   if (route === 'agent/stream') {
     await agentStream(url, req, res)
     return true

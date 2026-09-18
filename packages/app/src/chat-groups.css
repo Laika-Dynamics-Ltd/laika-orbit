@@ -1,0 +1,9 @@
+/* chat groups in the lists (chat-groups.ts): a group's name over its chats, click to fold */
+.cg-h { display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none }
+.cg-h span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.cg-h small { color: var(--c-faint); font-weight: 400; letter-spacing: 0 }
+.cg-h .cg-car { flex: none; width: 10px; font-style: normal; font-size: 9px; transition: transform 0.12s }
+.cg-h.folded .cg-car { transform: rotate(-90deg) }
+.cg-h:hover { color: var(--c-dim) }
+.gm-cg { margin: 6px 4px 2px; padding: 3px 10px; font-size: 11px; font-weight: 600; color: var(--c-dim) }
+.lib-cg { margin: 10px 8px 4px; font-size: 11px; font-weight: 600; color: var(--c-dim) }

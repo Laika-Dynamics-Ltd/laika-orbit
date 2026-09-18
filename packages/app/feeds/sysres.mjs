@@ -46,8 +46,19 @@ export function parseVmStat(text) {
   return Number.isFinite(used) ? { used, app, wired, compressed } : null
 }
 
+/** Linux: everything but MemAvailable is in use; MemFree alone would count the page cache as used */
+export function parseMeminfo(text) {
+  const kb = (k) => Number(new RegExp(`^${k}:\\s+(\\d+) kB`, 'm').exec(text)?.[1]) * 1024
+  const used = kb('MemTotal') - kb('MemAvailable')
+  return Number.isFinite(used) ? { used } : null
+}
+
 async function memory() {
   const fallback = { used: totalmem() - freemem() }
+  if (process.platform === 'linux') {
+    const info = await readFile('/proc/meminfo', 'utf8').catch(() => '')
+    return parseMeminfo(info) ?? fallback
+  }
   if (process.platform !== 'darwin') return fallback
   const out = await run('vm_stat', [])
   return (out && parseVmStat(out)) || fallback
@@ -96,6 +107,32 @@ function processes() {
     process.platform === 'darwin' ? ['-Aceo', 'pid=,pcpu=,rss=,comm='] : ['-Ao', 'pid=,pcpu=,rss=,comm=']
   procs = run('ps', args, 4000).then((out) => (out ? parsePs(out) : null))
   return procs
+}
+
+/** `nvidia-smi --query-gpu=name,utilization.gpu,memory.used,memory.total` rows, memory in MiB */
+export function parseNvidiaSmi(text) {
+  const gpus = []
+  for (const line of text.split('\n')) {
+    const f = line.split(',').map((x) => x.trim())
+    if (f.length !== 4 || !f[0]) continue
+    const [util, used, total] = f.slice(1).map(Number)
+    if ([util, used, total].some((n) => !Number.isFinite(n))) continue
+    gpus.push({ name: f[0], util, memUsed: used * 1024 ** 2, memTotal: total * 1024 ** 2 })
+  }
+  return gpus
+}
+
+let gpuList = null
+let gpuAt = 0
+/** NVIDIA GPUs and how busy they are; empty where there are none (every Mac) */
+export function gpus() {
+  if (process.platform === 'darwin') return Promise.resolve([])
+  if (gpuList && Date.now() - gpuAt < SHARE_MS) return gpuList
+  gpuAt = Date.now()
+  gpuList = run('nvidia-smi', ['--query-gpu=name,utilization.gpu,memory.used,memory.total', '--format=csv,noheader,nounits'], 4000).then(
+    (out) => (out ? parseNvidiaSmi(out) : []),
+  )
+  return gpuList
 }
 
 let last = ticks()

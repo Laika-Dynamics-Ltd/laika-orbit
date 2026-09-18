@@ -16,9 +16,7 @@
     "ical.js": "2.2.1",
     "node-pty": "1.1.0",
     "three": "0.186.0",
-    "troika-three-text": "0.52.5"
-  },
-  "devDependencies": {
+    "troika-three-text": "0.52.5",
     "vite": "8.3.0"
   }
 }

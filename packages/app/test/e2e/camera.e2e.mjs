@@ -23,6 +23,9 @@ describe('camera', { skip: !up && 'server not running on E2E_URL' }, () => {
   })
   beforeEach(async () => {
     await app.page.mouse.move(5, 5)
+    // the Claude dock opens on its own, and while it is open the keys are its; Escape closes it
+    await app.page.evaluate(() => document.activeElement?.blur?.())
+    if (await app.page.evaluate(() => document.querySelector('#ss')?.classList.contains('on'))) await app.page.keyboard.press('Escape')
     await app.page.evaluate(() => {
       globalThis.__camDbg.reset()
       globalThis.__camDbg.snap()

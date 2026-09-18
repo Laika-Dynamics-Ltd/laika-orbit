@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parsePs, parseSwapUsage, parseVmStat, sysres } from '../feeds/sysres.mjs'
+import { parseMeminfo, parseNvidiaSmi, parsePs, parseSwapUsage, parseVmStat, sysres } from '../feeds/sysres.mjs'
 
 const VM_STAT = `Mach Virtual Memory Statistics: (page size of 16384 bytes)
 Pages free:                                     4000.
@@ -22,6 +22,15 @@ describe('sysres', () => {
   it('gives up on output it cannot read', () => {
     expect(parseVmStat('nothing here')).toBeNull()
     expect(parseSwapUsage('nothing here')).toBeNull()
+  })
+  it('counts Linux memory as everything but MemAvailable', () => {
+    const info = 'MemTotal:       32000000 kB\nMemFree:         1000000 kB\nMemAvailable:   24000000 kB\n'
+    expect(parseMeminfo(info)).toEqual({ used: 8000000 * 1024 })
+    expect(parseMeminfo('nothing here')).toBeNull()
+  })
+  it('reads NVIDIA GPUs and skips rows it cannot read', () => {
+    const out = 'NVIDIA GeForce RTX 4090, 37, 2048, 24564\nNVIDIA A100-SXM4-80GB, [N/A], 0, 81920\n\n'
+    expect(parseNvidiaSmi(out)).toEqual([{ name: 'NVIDIA GeForce RTX 4090', util: 37, memUsed: 2048 * 1024 ** 2, memTotal: 24564 * 1024 ** 2 }])
   })
   it('reads swap from sysctl', () => {
     expect(parseSwapUsage('total = 13312.00M  used = 11956.50M  free = 1355.50M  (encrypted)')).toEqual({

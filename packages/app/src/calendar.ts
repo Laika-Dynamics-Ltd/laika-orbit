@@ -215,7 +215,7 @@ function yearGrid(week: number): string {
   return `<div class="yg">${out}</div>`
 }
 
-const VIEW_KEY = '1brain:cal-view'
+const VIEW_KEY = 'orbit:cal-view'
 function calView(): 'month' | 'year' {
   try {
     return localStorage.getItem(VIEW_KEY) === 'year' ? 'year' : 'month'

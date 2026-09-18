@@ -9,4 +9,4 @@
 - **Browser:** Chromium tabs with one storage profile per account, Chrome-style tabs, and Chrome
   extensions from the Web Store.
 - **Widgets:** Gmail inbox, iCal calendar, agents, routines and skills.
-- **1brain:** zero-model recall engine, CLI and MCP server.
+- **Laika Orbit recall:** zero-model recall engine, CLI and MCP server.

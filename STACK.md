@@ -1,4 +1,4 @@
-# laika-1brain — tech stack & setup definition of done
+# Laika Orbit — tech stack & setup definition of done
 
 Companion to [`PLAN.md`](PLAN.md). Every version below was resolved from the npm registry on
 2026-09-16 and every runtime claim was verified on this machine, not assumed.
@@ -126,10 +126,10 @@ Non-negotiables for hitting 60fps at 60k nodes:
 ## Repo layout
 
 ```
-laika-1brain/
+laika-orbit/
 ├── packages/
 │   ├── core/      zero runtime deps. indexer + recall. the IP.
-│   ├── cli/       1brain index | recall | ask | lint | serve
+│   ├── cli/       laikaorbit index | recall | ask | lint | serve
 │   ├── mcp/       MCP server over core (stdio transport)
 │   └── graph/     Vite + three.js + React chrome
 ├── bench/         scoring.bench.ts — CI perf gate
@@ -172,14 +172,14 @@ Each gate is a command that exits 0. "It works on my machine" is not a gate.
 - [ ] Malformed lines produce a **diagnostic with line number**, never a silent skip
 - [ ] ≥ 3 real Laika router files written by hand
 
-**Done when:** `1brain lint` reports zero unparseable lines across `brain/routers/`.
+**Done when:** `laikaorbit lint` reports zero unparseable lines across `brain/routers/`.
 
 ## Gate 3 — Index
 
-- [ ] Walks the workspace honouring `.gitignore` + `.1brainignore`
+- [ ] Walks the workspace honouring `.gitignore` + `.orbitignore`
 - [ ] Builds the inverted index (filenames w=3, catalogue w=2, topic map w=8)
 - [ ] Persists via `Store`; incremental re-index on content hash
-- [ ] `1brain status` prints file count, token count, index age, staleness
+- [ ] `laikaorbit status` prints file count, token count, index age, staleness
 
 **Targets — asserted in CI, not eyeballed:** cold index of 60k files **< 30s** · incremental **< 500ms** · index size **< 200MB**.
 
@@ -202,7 +202,7 @@ Each of the seven steps is a pure, separately-tested function.
 
 - [ ] Exposes `recall(question)`, `get(path)`, `status()` over stdio
 - [ ] Registered in `.mcp.json`; Claude Code lists the tools
-- [ ] **Benchmark reproduced**: same question, plain session vs 1brain session, `/context` compared,
+- [ ] **Benchmark reproduced**: same question, plain session vs a session with Laika Orbit recall, `/context` compared,
       result recorded in `bench/RESULTS.md`
 
 **Done when:** a real question is answered end-to-end in Claude Code *and* the token delta is written down.

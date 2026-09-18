@@ -1,0 +1,353 @@
+/*
+ * Runs — read at a glance from across the room: state first, then how far, then when.
+ * The views (.rn-list, .rn-run, .rn-cmp, .rn-strip) carry no position, width or z-index of their
+ * own, because a sliding panel hosts the same markup the page does. Ramp tokens only.
+ */
+.rn {
+  --bg: var(--n2);
+  --panel: var(--n6);
+  --line: var(--n16);
+  --tx: var(--n35);
+  --dim: var(--n29);
+  --faint: var(--n24);
+  --live: var(--cyan);
+  --bad: var(--err);
+  color: var(--tx);
+  font: 400 14px/1.45 system-ui, -apple-system, sans-serif;
+}
+.rn * { box-sizing: border-box }
+.rn code, .pg pre { font: 12px ui-monospace, Menlo, monospace }
+.rn-page { margin: 0; background: var(--n2) }
+
+.rn-top {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 20px;
+  padding: 12px 24px;
+  background: color-mix(in srgb, var(--n2) 92%, transparent);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--line);
+}
+.rn-brand { display: flex; align-items: center; gap: 8px; letter-spacing: 0.04em }
+.rn-brand-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--acc) }
+.rn-chips { display: flex; gap: 8px; flex-wrap: wrap }
+.rn-chip { padding: 4px 11px; border-radius: 999px; border: 1px solid var(--line); color: var(--dim); font-size: 13px }
+.rn-chip b { color: var(--tx); margin-right: 3px }
+.rn-chip.live b { color: var(--live) }
+.rn-chip.warn { border-color: var(--warn); color: var(--warn) }
+.rn-chip.bad { border-color: var(--bad); color: var(--bad) }
+.rn-chip.warn b, .rn-chip.bad b { color: inherit }
+.rn-right { margin-left: auto; display: flex; align-items: center; gap: 10px }
+.rn-feed { font-size: 12.5px; color: var(--faint); font-variant-numeric: tabular-nums }
+.rn-feed.ok { color: var(--ok) }
+.rn-feed.ok::before { content: ''; display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: var(--ok); animation: rn-pulse 1.6s infinite }
+.rn-feed.bad { color: var(--bad) }
+@keyframes rn-pulse { 50% { opacity: 0.3 } }
+
+.rn-btn {
+  font: 500 12.5px system-ui, sans-serif;
+  padding: 5px 11px;
+  border-radius: 7px;
+  border: 1px solid var(--info);
+  background: var(--info);
+  color: var(--info-ink);
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.rn-btn.ghost { background: transparent; border-color: var(--line); color: var(--dim) }
+.rn-btn:hover { filter: brightness(1.15) }
+.rn-btn.ghost:hover { color: var(--tx); border-color: var(--n21) }
+.rn-link { background: none; border: 0; padding: 0; color: var(--info); font: inherit; cursor: pointer }
+
+.rn-banner { padding: 9px 24px; background: var(--err-bg); color: var(--err-lt); border-bottom: 1px solid var(--err-bd) }
+
+.rn-main { max-width: 1280px; margin: 0 auto; padding: 8px 24px 60px }
+.rn-sec h2 {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 24px 0 10px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.rn-sec.alarm h2 { color: var(--bad) }
+.rn-sec h2 small { font-size: 12px; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--faint) }
+.rn-empty { color: var(--faint); margin: 6px 0 }
+.rn-empty.big { margin: 80px auto; max-width: 620px; text-align: center; font-size: 15px }
+.rn-empty pre { text-align: left; padding: 12px 14px; border-radius: 8px; background: var(--panel); border: 1px solid var(--line); color: var(--n32); white-space: pre-wrap }
+
+.rn-row {
+  margin-bottom: 12px;
+  padding: 14px 16px 12px;
+  border-radius: 10px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--live);
+}
+.rn-row.st-stalled, .rn-row.st-orphaned { border-color: var(--err-bd); border-left-color: var(--bad) }
+.rn-row.st-blocked { border-left-color: var(--warn) }
+.rn-row.st-done { border-left-color: var(--ok) }
+.rn-row.st-failed { border-left-color: var(--bad) }
+.rn-row.st-cancelled, .rn-row.st-idle { border-left-color: var(--faint) }
+.rn-sec.finished .rn-row { opacity: 0.82 }
+
+.rn-rtop { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px }
+.rn-rtop h3 { margin: 0; font-size: 16px; font-weight: 650 }
+.rn-state { padding: 1px 8px; border-radius: 5px; font-size: 12px; font-weight: 600; background: var(--n13); color: var(--live) }
+.rn-state.st-stalled, .rn-state.st-orphaned, .rn-state.st-failed { color: var(--bad); background: var(--err-bg) }
+.rn-state.st-blocked { color: var(--warn); background: var(--warn-bg) }
+.rn-state.st-done { color: var(--ok); background: var(--ok-bg) }
+.rn-state.st-idle, .rn-state.st-cancelled { color: var(--dim) }
+.rn-meta { font-size: 12.5px; color: var(--faint) }
+.rn-meta code { color: var(--dim) }
+.rn-rfoot { margin-left: auto; font-size: 12.5px; color: var(--dim); font-variant-numeric: tabular-nums }
+.rn-alarm { margin: 8px 0 0; padding: 7px 10px; border-radius: 7px; background: var(--err-bg); color: var(--err-lt); font-size: 13px }
+.rn-alarm b { color: var(--bad) }
+.rn-note { margin: 6px 0 0; color: var(--dim) }
+
+.rn-overall { display: flex; align-items: center; gap: 12px; margin-top: 10px }
+.rn-overall .rn-bar { flex: 1; height: 10px }
+.rn-bar { height: 6px; border-radius: 99px; background: var(--n13); overflow: hidden; min-width: 60px }
+.rn-bar > div { height: 100%; border-radius: inherit; background: var(--live); transition: width 0.6s ease }
+.rn-bar.s-done > div, .rn-bar.st-done > div { background: var(--ok) }
+.rn-bar.s-failed > div, .rn-bar.st-failed > div, .rn-bar.st-stalled > div, .rn-bar.st-orphaned > div { background: var(--bad) }
+.rn-bar.s-blocked > div, .rn-bar.st-blocked > div { background: var(--warn) }
+.rn-bar.s-queued > div, .rn-bar.s-skipped > div, .rn-bar.st-cancelled > div { background: var(--n24) }
+.rn-lane.stalled .rn-bar > div { background: var(--bad) }
+.rn-num { font-variant-numeric: tabular-nums; color: var(--dim); font-size: 12.5px; text-align: right }
+.rn-num.big { font-size: 15px; font-weight: 650; color: var(--tx); min-width: 44px }
+.rn-eta { font-size: 12.5px; color: var(--n32); font-variant-numeric: tabular-nums; white-space: nowrap }
+.rn-eta i { font-style: normal; color: var(--faint) }
+.rn-eta.none { color: var(--faint) }
+.rn-eta.late { color: var(--warn) }
+
+.rn-lanes { margin-top: 10px; border-top: 1px solid var(--line) }
+.rn-lane {
+  display: grid;
+  grid-template-columns: 12px minmax(110px, 1.1fr) minmax(80px, 2fr) 56px 200px 76px;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 7px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
+}
+.rn-lane:last-child { border-bottom: 0 }
+.rn-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--n24) }
+.rn-lane.s-running .rn-dot { background: var(--live); animation: rn-pulse 1.6s infinite }
+.rn-lane.s-done .rn-dot { background: var(--ok) }
+.rn-lane.s-failed .rn-dot, .rn-lane.stalled .rn-dot { background: var(--bad); animation: none }
+.rn-lane.s-blocked .rn-dot { background: var(--warn) }
+.rn-lname { font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.rn-lane.s-done .rn-lname, .rn-lane.s-skipped .rn-lname { color: var(--dim) }
+.rn-leta { text-align: right }
+.rn-lago { font-size: 12px; color: var(--faint); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap }
+.rn-lago.bad { color: var(--bad); font-weight: 600 }
+.rn-lnote { grid-column: 2 / -1; margin: 0; font-size: 12.5px; color: var(--dim) }
+.rn-lane.s-blocked .rn-lnote { color: var(--warn) }
+.rn-jobs { grid-column: 2 / -1; display: flex; flex-wrap: wrap; gap: 5px }
+.rn-job { padding: 1px 7px; border-radius: 5px; font-size: 12px; background: var(--n11); color: var(--dim); border: 1px solid var(--line) }
+.rn-job.s-running { color: var(--live); border-color: color-mix(in srgb, var(--live) 40%, transparent) }
+.rn-job.s-done { color: var(--ok); border-color: var(--ok-bd) }
+.rn-job.s-failed { color: var(--bad); border-color: var(--err-bd) }
+.rn-job.s-blocked { color: var(--warn); border-color: var(--warn-bd) }
+.rn-job.s-skipped, .rn-job.s-queued { color: var(--faint) }
+.rn-more { padding: 1px 7px; border-radius: 5px; font-size: 12px; background: none; color: var(--info); border: 1px dashed var(--line); cursor: pointer }
+.rn-acts { display: flex; justify-content: flex-end; margin-top: 8px }
+
+@media (max-width: 720px) {
+  .rn-top, .rn-main { padding-left: 16px; padding-right: 16px }
+  .rn-right { margin-left: 0 }
+  .rn-lane { grid-template-columns: 12px 1fr auto }
+  .rn-overall { flex-wrap: wrap }
+  .rn-overall .rn-bar { flex-basis: calc(100% - 60px) }
+  .rn-lane .rn-bar { grid-column: 2 / -1; grid-row: 2 }
+  .rn-lane .rn-leta { grid-column: 2; grid-row: 3; text-align: left }
+  .rn-lane .rn-lago { grid-column: 3; grid-row: 3 }
+  .rn-rfoot { margin-left: 0; width: 100% }
+}
+
+/* ── the run list: a button per run, grouped by project ─────────────────────────────────────── */
+.rn-proj { margin-bottom: 18px }
+.rn-proj h3 {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 6px;
+  font-size: 12.5px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  color: var(--n32);
+}
+.rn-proj h3 small { color: var(--faint); font-weight: 400 }
+.rn-row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.rn-row:hover { border-color: var(--n21) }
+.rn-row:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px }
+.rn-rtop { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px }
+.rn-rtitle { font-size: 15px; font-weight: 600 }
+.rn-rbar { display: flex; align-items: center; gap: 12px; margin-top: 8px }
+.rn-rbar .rn-bar { flex: 1; height: 8px }
+.rn-rbar .rn-num { min-width: 38px }
+.rn-rfoot { display: block; margin-top: 6px; font-size: 12.5px; color: var(--faint) }
+.rn-rfoot code { color: var(--dim) }
+.rn-alarm { display: block }
+.rn-note { display: block }
+.rn-tag {
+  padding: 1px 7px;
+  border-radius: 5px;
+  font-size: 11.5px;
+  background: var(--n11);
+  border: 1px solid var(--line);
+  color: var(--dim);
+}
+/* an offload machine's state inside its tag: up or down, and whether it has a GPU */
+.rn-where .rn-dot { display: inline-block; width: 6px; height: 6px; margin-right: 5px; border-radius: 50%; background: var(--ok); vertical-align: 1px }
+.rn-where.off { color: var(--err) }
+.rn-where.off .rn-dot { background: var(--err) }
+.rn-where small { margin-left: 5px; font-size: 9.5px; letter-spacing: 0.04em; color: var(--n24) }
+/* where the work runs, so a loaded machine is visible before you wonder why it is slow */
+.rn-where {
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 5px;
+  font-size: 11.5px;
+  color: var(--n32);
+  background: var(--n9);
+  border: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+/* ── one run ────────────────────────────────────────────────────────────────────────────────── */
+.rn-run { padding: 0 }
+.rn-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 12px; margin-bottom: 10px }
+.rn-head h2 { margin: 0; font-size: 19px; font-weight: 650 }
+.rn-head .rn-link { margin-right: 4px }
+.rn-overall { display: flex; align-items: center; gap: 12px; margin: 10px 0 }
+.rn-overall .rn-bar { flex: 1; height: 10px }
+.rn-dim { color: var(--faint); font-size: 12.5px }
+.rn-alarm.big { font-size: 14px }
+.rn-acts { display: flex; justify-content: flex-end; margin-top: 14px }
+.rn-sec h3, .rn-wave h3 {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 22px 0 8px;
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.rn-sec h3 small, .rn-wave h3 small { font-size: 12px; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--faint) }
+.rn-wave { padding-top: 6px; border-top: 1px solid var(--line) }
+
+/* ── artefacts: what the run made, never a picture of Orbit itself ──────────────────────────── */
+.rn-arts { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px }
+.rn-art {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel);
+  overflow: hidden;
+}
+.rn-art > a { display: block; aspect-ratio: 16 / 10; background: var(--n4) }
+/* contain, not cover: a cropped artefact is a different artefact, and these are the evidence */
+.rn-art img, .rn-art video { width: 100%; height: 100%; object-fit: contain; display: block }
+.rn-art figcaption { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; padding: 7px 9px; font-size: 12.5px }
+.rn-art figcaption b { min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.rn-art figcaption .rn-link, .rn-art figcaption .rn-warn { flex: none; margin-left: auto }
+.rn-art.suspect { border-color: var(--warn-bd) }
+.rn-kind, .rn-gone {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--faint);
+  font-size: 12.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.rn-gone { color: var(--bad) }
+.rn-warn { color: var(--warn); font-size: 12px }
+
+/* ── compare: the whole point is that they are the same size, side by side ──────────────────── */
+/* equal frames, whatever shape the files are: the eye compares the work, not the crop */
+.rn-cmp-grid { display: grid; grid-template-columns: repeat(var(--cols, 2), 1fr); gap: 14px; align-items: stretch }
+.rn-cmp-cell { margin: 0; display: flex; flex-direction: column }
+.rn-cmp-cell figcaption { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; padding: 0 0 6px; font-size: 13px }
+.rn-cmp-cell figcaption b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.rn-cmp-cell figcaption .rn-mark, .rn-cmp-cell figcaption .rn-dim, .rn-cmp-cell figcaption .rn-warn { flex: none; white-space: nowrap }
+.rn-cmp-cell > a { display: flex; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; background: var(--n4) }
+/* both sides get the same box, so the comparison is of the work and not of how big the file is */
+.rn-cmp-cell > a { height: 68vh }
+.rn-cmp-cell img, .rn-cmp-cell video { width: 100%; height: 100%; object-fit: contain; display: block }
+.rn-cmp-cell iframe { width: 100%; height: 100%; border: 0; background: var(--n0) }
+.rn-cmp-cell iframe.rn-log { background: var(--n2) }
+.rn-cmp-cell.suspect > a { border-color: var(--warn-bd) }
+.rn-mark { padding: 1px 7px; border-radius: 5px; font-size: 11.5px; background: var(--n11); border: 1px solid var(--line); color: var(--dim) }
+.rn-mark.won { color: var(--ok); border-color: var(--ok-bd); background: var(--ok-bg) }
+.rn-mark.lost { color: var(--dim) }
+
+/* ── verdicts: the gauntlet's layer, on the same run ────────────────────────────────────────── */
+.rn-verdicts { width: 100%; border-collapse: collapse; font-size: 13px }
+.rn-verdicts th {
+  text-align: left;
+  padding: 5px 10px 5px 0;
+  font-size: 11.5px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--faint);
+  border-bottom: 1px solid var(--line);
+}
+.rn-verdicts td { padding: 6px 10px 6px 0; border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent); vertical-align: top }
+.rn-verdicts tr.w-candidate td b { color: var(--ok) }
+.rn-verdicts tr.w-reference td b { color: var(--warn) }
+.rn-verdicts tr.w-tie td b { color: var(--dim) }
+.rn-why { color: var(--dim) }
+
+/* ── the compact strip, for inside a chat ───────────────────────────────────────────────────── */
+.rn-strip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--tx);
+  font: 400 12.5px/1.4 system-ui, sans-serif;
+  cursor: pointer;
+  text-align: left;
+}
+.rn-strip:hover { border-color: var(--n21) }
+/* a flex row's min-width is its content unless told otherwise, and this one lives in a chat log */
+.rn-strip, .rn-strip-host { min-width: 0; max-width: 100%; overflow: hidden }
+.rn-strip .rn-bar { flex: 1; height: 5px; min-width: 50px }
+.rn-stitle { flex: 0 1 auto; min-width: 0; font-weight: 600; max-width: 34%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.rn-slane { flex: 0 1 auto; min-width: 0; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.rn-strip .rn-eta, .rn-strip .rn-num, .rn-strip .rn-where { flex: none }
+.rn-sdot { width: 7px; height: 7px; border-radius: 50%; background: var(--live); flex: none }
+.rn-strip.st-running .rn-sdot { animation: rn-pulse 1.6s infinite }
+.rn-strip.st-stalled .rn-sdot, .rn-strip.st-orphaned .rn-sdot, .rn-strip.st-failed .rn-sdot { background: var(--bad) }
+.rn-strip.st-blocked .rn-sdot { background: var(--warn) }
+.rn-strip.st-done .rn-sdot { background: var(--ok) }
+.rn-strip.st-stalled .rn-slane { flex: none; max-width: 55%; color: var(--bad); font-weight: 600 }
+
+@media (max-width: 720px) {
+  .rn-cmp-grid { grid-template-columns: 1fr }
+}

@@ -1,5 +1,5 @@
 /**
- * laika-1brain shell: the dashboard as a desktop window, with a browser inside it.
+ * Laika Orbit shell: the dashboard as a desktop window, with a browser inside it.
  *
  * The window is the :5200 page, unchanged. The browser is a set of Chromium WebContentsViews
  * drawn over the page's browser dock, one per tab, each bound to a *profile*: its own
@@ -32,6 +32,7 @@ import {
   session,
   shell,
   WebContentsView,
+  webContents,
 } from 'electron'
 import { ElectronChromeExtensions } from 'electron-chrome-extensions'
 import { installChromeWebStore, installExtension, uninstallExtension } from 'electron-chrome-web-store'
@@ -44,7 +45,16 @@ const HERE = dirname(fileURLToPath(import.meta.url))
 // the Dock app's launcher hands over its repo.json; `pnpm shell` from the checkout has none
 const REPO = globalThis.__laikaRepo ?? (existsSync(join(HERE, 'repo.json')) ? JSON.parse(readFileSync(join(HERE, 'repo.json'), 'utf8')) : null)
 const PORT = String(REPO?.port ?? process.env.PORT ?? 5200)
-const APP_URL = (process.env.APP_URL ?? `http://127.0.0.1:${PORT}`).replace(/\/$/, '')
+/**
+ * The window loads the app over `localhost`, never `127.0.0.1`, even though the server binds the
+ * loopback address either name reaches. The two are the same machine but not the same origin, and
+ * YouTube refuses to play an embed whose page origin is a bare IP: its /embed response comes back
+ * `playabilityStatus: UNPLAYABLE` for `http://127.0.0.1:<port>` and `OK` for `http://localhost:<port>`,
+ * with everything else held identical. That is decided by the page's Referer, so nothing inside the
+ * player (youtube.ts) can work around it — the frame's own origin has to be a name. An APP_URL
+ * given by hand is normalised the same way, so a dev build cannot quietly lose video either.
+ */
+const APP_URL = (process.env.APP_URL ?? `http://localhost:${PORT}`).replace(/\/$/, '').replace(/^(https?:\/\/)127\.0\.0\.1(?=[:/]|$)/, '$1localhost')
 const APP_ORIGIN = new URL(APP_URL).origin
 const SERVER = REPO ? join(REPO.root, 'packages/app/server.mjs') : resolve(HERE, '../app/server.mjs')
 const NODE = REPO?.node ?? 'node'
@@ -60,18 +70,20 @@ app.setName(REPO?.name ?? 'Laika Orbit')
 // the self-test keeps its profiles and tabs to itself; each installed app has its own folder
 app.setPath(
   'userData',
-  process.env.LAIKA_SHELL_USER_DATA ?? (SMOKE ? join(SMOKE, 'userData') : join(app.getPath('appData'), REPO?.userData ?? 'laika-1brain')),
+  process.env.LAIKA_SHELL_USER_DATA ?? (SMOKE ? join(SMOKE, 'userData') : join(app.getPath('appData'), REPO?.userData ?? 'Laika Orbit')),
 )
 app.userAgentFallback = UA
 nativeTheme.themeSource = 'dark'
 const STATE_FILE = join(app.getPath('userData'), 'browser.json')
 
 // ------------------------------------------------------------------ state ----
-/** @type {{profiles: {id:string,name:string,colour:string}[], defaultProfile: string|null, history: any[], window: any, popouts: Record<string, any>, zoom: Record<string, Record<string, number>>, bookmarks: Record<string, {id:string,url:string,title:string,favicon:string|null}[]>, bookmarkBar: boolean}} */
-let store = { profiles: [], defaultProfile: null, history: [], window: null, popouts: {}, zoom: {}, bookmarks: {}, bookmarkBar: true }
+/** @type {{profiles: {id:string,name:string,colour:string}[], defaultProfile: string|null, history: any[], window: any, popouts: Record<string, any>, zoom: Record<string, Record<string, number>>, appZoom: number, bookmarks: Record<string, {id:string,url:string,title:string,favicon:string|null}[]>, bookmarkBar: boolean}} */
+let store = { profiles: [], defaultProfile: null, history: [], window: null, popouts: {}, zoom: {}, appZoom: 1, bookmarks: {}, bookmarkBar: true }
 /** @type {{id:string, profile:string, url:string|null, title:string, favicon:string|null, loading:boolean, audible:boolean, muted:boolean, failed:any, opener:string|null, nav:any, zoom:number, view:WebContentsView|null}[]} */
 let tabs = []
 let active = null
+/** tabs shown side by side: a on the left, b on the right, ratio = a's share of the width */
+let splits = []
 let closed = [] // recently closed, for ⇧⌥T: where they sat and their back/forward history
 let downloads = [] // newest first, kept across launches
 const MAX_DOWNLOADS = 30
@@ -97,6 +109,11 @@ async function loadStore() {
     }
     // tab ids restart each launch; the saved `active` is an index into the saved list
     active = tabs[raw.active]?.id ?? tabs[0]?.id ?? null
+    // saved splits name their tabs by index too
+    for (const x of raw.splits ?? []) {
+      const [a, b] = [tabs[x.a], tabs[x.b]]
+      if (a && b && a !== b && !splitOf(a.id) && !splitOf(b.id)) splits.push({ a: a.id, b: b.id, ratio: clampRatio(x.ratio) })
+    }
     // a download the last launch did not finish cannot resume: it stopped when the app did
     downloads = (raw.downloads ?? []).map((d) => (d.state === 'progressing' ? { ...d, state: 'interrupted' } : d))
   } catch {}
@@ -116,8 +133,10 @@ function storeData() {
     window: win && !win.isDestroyed() ? win.getNormalBounds() : store.window,
     tabs: tabs.map((t) => ({ profile: t.profile, url: t.url, title: t.title, nav: tabHistory(t) })),
     active: tabs.findIndex((t) => t.id === active),
+    splits: splits.map((x) => ({ a: tabs.findIndex((t) => t.id === x.a), b: tabs.findIndex((t) => t.id === x.b), ratio: x.ratio })),
     popouts: store.popouts,
     zoom: store.zoom,
+    appZoom: store.appZoom,
     bookmarks: store.bookmarks,
     bookmarkBar: store.bookmarkBar,
     downloads: downloads.slice(0, MAX_DOWNLOADS),
@@ -147,6 +166,8 @@ const blankTab = (profile, url = null, title = '') => ({
   nav: null, // back/forward history kept while the tab has no renderer: {entries, index}
   zoom: 1, // page zoom factor, for the toolbar's indicator
   view: null,
+  heard: false, // you let this page play sound (it started while shown, or you unmuted it)
+  sleepTimer: null, // suspends the tab once it has been out of view for SLEEP_AFTER_MS
 })
 const tabOf = (id) => tabs.find((t) => t.id === id)
 const activeTab = () => tabOf(active)
@@ -161,6 +182,7 @@ function snapshot() {
       return { ...rest, sleeping: !!t.url && !view, wcId: view?.webContents.id ?? null, canGoBack: canStep(t, -1), canGoForward: canStep(t, 1) }
     }),
     active,
+    splits,
     history: store.history.slice(0, 120),
     bookmarks: store.bookmarks,
     bookmarkBar: store.bookmarkBar,
@@ -263,30 +285,148 @@ const safeOrigin = (u) => {
 // ------------------------------------------------------------------- tabs ----
 function attach(t) {
   if (!win || !t.view) return
+  clearTimeout(t.sleepTimer)
+  t.sleepTimer = null
   if (!win.contentView.children.includes(t.view)) win.contentView.addChildView(t.view)
 }
 function detach(t) {
   if (!win || !t.view) return
-  if (win.contentView.children.includes(t.view)) win.contentView.removeChildView(t.view)
+  if (!win.contentView.children.includes(t.view)) return
+  win.contentView.removeChildView(t.view)
+  // out of view: Chromium throttles it, and after a while it gives its renderer back
+  clearTimeout(t.sleepTimer)
+  t.sleepTimer = setTimeout(() => sleepTab(t), SLEEP_AFTER_MS)
 }
+/**
+ * A tab out of view this long is suspended: its renderer closes, its address and back/forward
+ * history stay (the same state a restored tab starts in), and it loads again when shown.
+ * A tab playing sound stays awake; it is checked again later.
+ */
+const SLEEP_AFTER_MS = 10 * 60_000
+function sleepTab(t) {
+  t.sleepTimer = null
+  if (!t.view || !tabs.includes(t) || win?.contentView.children.includes(t.view)) return
+  if (t.audible) {
+    t.sleepTimer = setTimeout(() => sleepTab(t), SLEEP_AFTER_MS)
+    return
+  }
+  t.nav = tabHistory(t)
+  const wc = t.view.webContents
+  t.view = null
+  t.loading = false
+  if (!wc.isDestroyed()) wc.close()
+  push()
+}
+const shownNow = (t) => !!(win && t.view && win.contentView.children.includes(t.view))
 let fullscreenTab = null
-/** One native view at most: the active tab's, only while the dock is open and uncovered. */
+/**
+ * The native views on show: the active tab's, and its split partner's, only while the dock is
+ * open and uncovered. A split's two rectangles come from the page, which lays out the panes.
+ */
 function layout() {
   if (!win) return
   const t = activeTab()
-  for (const x of tabs) if (x !== t) detach(x)
-  if (!t) return
-  if (t.url && !t.view) wake(t)
-  if (!t.view) return
-  if (fullscreenTab === t) {
-    attach(t)
+  const s = t && splitOf(t.id)
+  // until the page has measured the panes, the active tab alone fills the dock
+  const panes = s && bounds?.panes?.[s.a] && bounds.panes[s.b] ? bounds.panes : null
+  const shown = panes ? [tabOf(s.a), tabOf(s.b)] : t ? [t] : []
+  for (const x of tabs) if (!shown.includes(x)) detach(x)
+  for (const x of shown) if (x.url && !x.view) wake(x)
+  if (fullscreenTab && shown.includes(fullscreenTab) && fullscreenTab.view) {
+    for (const x of shown) if (x !== fullscreenTab) detach(x)
+    attach(fullscreenTab)
     const [w, h] = win.getContentSize()
-    t.view.setBounds({ x: 0, y: 0, width: w, height: h })
+    fullscreenTab.view.setBounds({ x: 0, y: 0, width: w, height: h })
     return
   }
-  if (!bounds || covered) return detach(t)
-  attach(t)
-  t.view.setBounds(bounds)
+  for (const x of shown) {
+    if (!x.view) continue
+    if (!bounds || covered) {
+      detach(x)
+      continue
+    }
+    attach(x)
+    const { panes: _, ...whole } = bounds
+    x.view.setBounds(panes ? panes[x.id] : whole)
+  }
+}
+
+// ------------------------------------------------------------------ split ----
+const clampRatio = (r) => Math.min(0.85, Math.max(0.15, Number.isFinite(r) ? r : 0.5))
+function splitOf(id) {
+  return splits.find((x) => x.a === id || x.b === id) ?? null
+}
+function partnerOf(id) {
+  const s = splitOf(id)
+  return s ? tabOf(s.a === id ? s.b : s.a) : null
+}
+/** put the pair next to each other in the strip, a first, where a (or b) was */
+function keepTogether(s) {
+  const a = tabOf(s.a)
+  const b = tabOf(s.b)
+  const at = Math.min(tabs.indexOf(a), tabs.indexOf(b))
+  tabs = tabs.filter((x) => x !== a && x !== b)
+  tabs.splice(at, 0, a, b)
+}
+/** t beside another tab, or beside a new tab of its profile (which then gets the address bar) */
+function splitTab(t, withId = null, side = 'right') {
+  if (!t || splitOf(t.id)) return null
+  let other = withId ? tabOf(withId) : null
+  if (other && (other === t || splitOf(other.id))) return null
+  const fresh = !other
+  other ??= openTab(t.profile, null, { after: t, activate: false })
+  const s = side === 'left' ? { a: other.id, b: t.id, ratio: 0.5 } : { a: t.id, b: other.id, ratio: 0.5 }
+  splits.push(s)
+  keepTogether(s)
+  activateTab(fresh ? other.id : t.id)
+  if (fresh) cmd('focus-omnibox')
+  return s
+}
+function unsplit(id) {
+  splits = splits.filter((x) => x.a !== id && x.b !== id)
+  layout()
+  push()
+}
+/** a blank pane takes a tab you picked for it; the blank tab goes */
+function fillSplit(blankId, withId) {
+  const s = splitOf(blankId)
+  const other = tabOf(withId)
+  if (!s || !other || splitOf(withId) || tabOf(blankId)?.url) return
+  if (s.a === blankId) s.a = withId
+  else s.b = withId
+  closeTab(blankId)
+  keepTogether(s)
+  activateTab(withId)
+}
+/**
+ * The divider is dragged in the page, but the cursor soon crosses a native view, which then
+ * gets the mouse. So the shell follows the drag from every view's mouse events until release.
+ */
+let splitDrag = null
+function startSplitDrag(s) {
+  endSplitDrag()
+  const wcs = [win.webContents, tabOf(s.a)?.view?.webContents, tabOf(s.b)?.view?.webContents].filter(Boolean)
+  const offs = []
+  for (const wc of wcs) {
+    const h = (e, m) => {
+      if (m.type !== 'mouseMove' && m.type !== 'mouseUp') return
+      e.preventDefault()
+      const lb = Array.isArray(m.modifiers) && m.modifiers.some((k) => k.toLowerCase() === 'leftbuttondown')
+      if (m.type === 'mouseUp' || !lb) return endSplitDrag()
+      const view = [tabOf(s.a), tabOf(s.b)].find((x) => x?.view?.webContents === wc)
+      const x = (view ? view.view.getBounds().x : 0) + m.x
+      if (!bounds) return
+      s.ratio = clampRatio((x - bounds.x) / bounds.width)
+      push()
+    }
+    wc.on('before-mouse-event', h)
+    offs.push(() => !wc.isDestroyed() && wc.off('before-mouse-event', h))
+  }
+  splitDrag = { offs }
+}
+function endSplitDrag() {
+  for (const off of splitDrag?.offs ?? []) off()
+  splitDrag = null
 }
 
 function wake(t) {
@@ -342,6 +482,7 @@ function wake(t) {
   })
   wc.on('did-navigate', (_e, url) => {
     if (url.startsWith('data:')) return // our own error page keeps the address it failed on
+    t.heard = false // a new page has to be started again to play in the background
     t.url = url
     t.failed = null
     t.favicon = null
@@ -366,9 +507,20 @@ function wake(t) {
     t.failed = { code: 0, desc: `The page crashed (${d.reason})`, url: t.url }
     push()
   })
-  wc.on('audio-state-changed', (_e, { audible }) => {
-    t.audible = audible
+  // Electron 44 emits a single event object carrying `.audible`; older builds passed the
+  // boolean as a second argument. Reading the second argument alone threw the moment a tab
+  // started playing audio, which took the whole main process down — so read both shapes.
+  wc.on('audio-state-changed', (e, legacy) => {
+    t.audible = typeof legacy === 'boolean' ? legacy : (e?.audible ?? false)
+    // sound plays where you started it: a tab that starts on its own while out of view is muted
+    // (unmuting it from the tab strip lets it play)
+    if (t.audible && shownNow(t)) t.heard = true
+    else if (t.audible && !t.heard && !t.muted) return setMuted(t, true)
     push()
+  })
+  // a click in the other half of a split makes that tab the one the toolbar drives
+  wc.on('focus', () => {
+    if (active !== t.id && splitOf(t.id) && splitOf(t.id) === splitOf(active)) activateTab(t.id)
   })
   wc.on('enter-html-full-screen', () => {
     fullscreenTab = t
@@ -485,6 +637,32 @@ function zoomTab(t, dir) {
   for (const x of tabs) if (x.profile === t.profile && x.url && zoomKey(x.url) === key) x.zoom = next
   push()
 }
+// Orbit's own pages zoom too, between these. Chromium applies one zoom per origin, so the main
+// window and every pop-out move together; store.appZoom brings it back next launch.
+const APP_ZOOMS = ZOOMS.filter((z) => z >= 0.5 && z <= 2)
+function zoomApp(dir) {
+  const wc = win && !win.isDestroyed() ? win.webContents : null
+  if (!wc) return
+  const now = wc.getZoomFactor()
+  const next = dir === 0 ? 1 : dir > 0 ? (APP_ZOOMS.find((z) => z > now + 0.001) ?? APP_ZOOMS.at(-1)) : (APP_ZOOMS.findLast((z) => z < now - 0.001) ?? APP_ZOOMS[0])
+  store.appZoom = next
+  wc.setZoomFactor(next)
+  save()
+}
+/**
+ * ⌘+ ⌘- ⌘0 zoom what you are working in: a web tab when it has focus, or when focus is in the
+ * browser dock around it; anywhere else in Orbit (or with the dock closed), Orbit itself.
+ */
+async function zoomFocused(dir) {
+  const focused = webContents.getFocusedWebContents()
+  const tab = tabs.find((t) => t.view && t.view.webContents === focused)
+  if (tab) return zoomTab(tab, dir)
+  if (bounds !== null && !covered && activeTab()?.url && focused === win?.webContents) {
+    const inDock = await win.webContents.executeJavaScript(`!!document.activeElement?.closest('#wb')`).catch(() => false)
+    if (inDock) return zoomTab(activeTab(), dir)
+  }
+  zoomApp(dir)
+}
 /** a page arrived: give its site the zoom it had last time */
 function applyZoom(t) {
   const wc = t.view?.webContents
@@ -533,17 +711,21 @@ function closeTab(id) {
   const i = tabs.findIndex((t) => t.id === id)
   if (i < 0) return
   const t = tabs[i]
+  // the other half of a split takes over the dock
+  const partner = partnerOf(id)
+  if (partner) splits = splits.filter((x) => x.a !== id && x.b !== id)
   if (t.url) closed.unshift({ profile: t.profile, url: t.url, title: t.title, index: i, nav: tabHistory(t) })
   tabs.splice(i, 1)
   closed = closed.slice(0, 20)
   detach(t)
+  clearTimeout(t.sleepTimer)
   t.view?.webContents.close()
   t.view = null
   if (active === id) {
-    active = (tabs[i] ?? tabs[i - 1])?.id ?? null
+    active = (partner ?? tabs[i] ?? tabs[i - 1])?.id ?? null
     if (active) activateTab(active)
     else layout()
-  }
+  } else if (partner) layout()
   push()
 }
 function reopenTab() {
@@ -594,6 +776,7 @@ function contextMenu(t, p, wc) {
   if (p.linkURL) {
     items.push(
       { label: 'Open Link in New Tab', click: () => openTab(t.profile, p.linkURL, { activate: false, after: t, opener: t }) },
+      ...(splitOf(t.id) ? [] : [{ label: 'Open Link in Split View', click: () => splitTab(t, openTab(t.profile, p.linkURL, { activate: false, after: t }).id) }]),
       ...(others.length ? [{ label: 'Open Link in Profile', submenu: others.map((pr) => ({ label: pr.name, click: () => openTab(pr.id, p.linkURL, { after: t }) })) }] : []),
       { label: 'Copy Link', click: () => clipboard.writeText(p.linkURL) },
       { type: 'separator' },
@@ -657,6 +840,18 @@ function tabMenu(t) {
     { label: t.muted ? 'Unmute Tab' : 'Mute Tab', click: () => setMuted(t, !t.muted) },
     { label: 'Copy Address', enabled: !!t.url, click: () => clipboard.writeText(t.url) },
     { type: 'separator' },
+    ...(splitOf(t.id)
+      ? [
+          { label: 'Swap Sides', click: () => ipcSplitSwap(t.id) },
+          { label: 'Exit Split View', click: () => unsplit(t.id) },
+        ]
+      : [
+          { label: 'Split View with New Tab', click: () => splitTab(t) },
+          ...(splitCandidates(t).length
+            ? [{ label: 'Split View With', submenu: splitCandidates(t).map((x) => ({ label: (x.title || x.url || 'New tab').slice(0, 60), click: () => splitTab(t, x.id) })) }]
+            : []),
+        ]),
+    { type: 'separator' },
     { label: 'Close Tab', click: () => closeTab(t.id) },
     { label: 'Close Other Tabs', enabled: tabs.length > 1, click: () => closeAll(tabs.filter((x) => x !== t)) },
     { label: 'Close Tabs to the Right', enabled: i < tabs.length - 1, click: () => closeAll(tabs.slice(i + 1)) },
@@ -665,8 +860,20 @@ function tabMenu(t) {
   ]
   Menu.buildFromTemplate(items).popup({ window: win })
 }
+/** tabs that could share the dock with t: not t, not already split */
+const splitCandidates = (t) => tabs.filter((x) => x !== t && !splitOf(x.id)).slice(0, 12)
+function ipcSplitSwap(id) {
+  const s = splitOf(id)
+  if (!s) return
+  ;[s.a, s.b] = [s.b, s.a]
+  s.ratio = 1 - s.ratio
+  keepTogether(s)
+  layout()
+  push()
+}
 function setMuted(t, on) {
   t.muted = on
+  if (!on) t.heard = true
   t.view?.webContents.setAudioMuted(on)
   push()
 }
@@ -925,7 +1132,12 @@ ipcMain.handle('shell:extensions', async (_e, a) => {
 ipcMain.handle('shell:state', () => snapshot())
 ipcMain.on('shell:bounds', (_e, rect) => {
   const wasOpen = bounds !== null
-  bounds = rect && rect.width > 0 && rect.height > 0 ? { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) } : null
+  // the page measures in CSS pixels; zoomed, each one is `z` window pixels
+  const z = win && !win.isDestroyed() ? win.webContents.getZoomFactor() : 1
+  const box = (r) => ({ x: Math.round(r.x * z), y: Math.round(r.y * z), width: Math.round(r.width * z), height: Math.round(r.height * z) })
+  bounds = rect && rect.width > 0 && rect.height > 0 ? box(rect) : null
+  // a split's panes, by tab id
+  if (bounds && rect.panes) bounds.panes = Object.fromEntries(Object.entries(rect.panes).map(([id, r]) => [id, box(r)]))
   layout()
   if (wasOpen !== (bounds !== null)) push() // dockOpen is part of the snapshot
 })
@@ -966,9 +1178,30 @@ ipcMain.handle('shell:tab', (_e, a) => {
       return t && setMuted(t, !!a.on)
     case 'move': {
       if (!t) return
-      tabs.splice(tabs.indexOf(t), 1)
-      tabs.splice(Math.max(0, Math.min(tabs.length, a.index)), 0, t)
+      // a split moves as one
+      const s = splitOf(t.id)
+      const group = s ? [tabOf(s.a), tabOf(s.b)] : [t]
+      const at = tabs.slice(0, a.index).filter((x) => !group.includes(x)).length
+      tabs = tabs.filter((x) => !group.includes(x))
+      tabs.splice(Math.max(0, Math.min(tabs.length, at)), 0, ...group)
       return push()
+    }
+    case 'split':
+      return !!splitTab(t, a.with ?? null, a.side)
+    case 'unsplit':
+      return unsplit(a.id)
+    case 'split-fill':
+      return fillSplit(a.id, a.with)
+    case 'split-swap':
+      return ipcSplitSwap(a.id)
+    case 'split-ratio': {
+      const s = splitOf(a.id)
+      if (s) s.ratio = clampRatio(a.ratio)
+      return push()
+    }
+    case 'split-drag': {
+      const s = splitOf(a.id)
+      return s && startSplitDrag(s)
     }
     case 'find':
       return a.text ? wc?.findInPage(a.text, { forward: a.forward !== false, findNext: !!a.next }) : wc?.stopFindInPage('clearSelection')
@@ -1086,13 +1319,14 @@ function buildMenu() {
         { label: 'Back', accelerator: 'CmdOrCtrl+[', click: () => bounds !== null && goTab(activeTab(), -1) },
         { label: 'Forward', accelerator: 'CmdOrCtrl+]', click: () => bounds !== null && goTab(activeTab(), 1) },
         { type: 'separator' },
-        { label: 'Actual Size', accelerator: 'CmdOrCtrl+0', click: () => bounds !== null && zoomTab(activeTab(), 0) },
-        { label: 'Zoom In', accelerator: 'CmdOrCtrl+=', click: () => bounds !== null && zoomTab(activeTab(), 1) },
-        { label: 'Zoom In', accelerator: 'CmdOrCtrl+Plus', visible: false, click: () => bounds !== null && zoomTab(activeTab(), 1) },
-        { label: 'Zoom Out', accelerator: 'CmdOrCtrl+-', click: () => bounds !== null && zoomTab(activeTab(), -1) },
+        { label: 'Actual Size', accelerator: 'CmdOrCtrl+0', click: () => zoomFocused(0) },
+        { label: 'Zoom In', accelerator: 'CmdOrCtrl+=', click: () => zoomFocused(1) },
+        { label: 'Zoom In', accelerator: 'CmdOrCtrl+Plus', visible: false, click: () => zoomFocused(1) },
+        { label: 'Zoom Out', accelerator: 'CmdOrCtrl+-', click: () => zoomFocused(-1) },
         { type: 'separator' },
+        { label: 'Split View', accelerator: 'CmdOrCtrl+\\', click: () => bounds !== null && activeTab() && (splitOf(active) ? unsplit(active) : splitTab(activeTab())) },
         { label: 'Downloads', accelerator: 'Alt+CmdOrCtrl+L', click: dockCmd('downloads') },
-        { label: 'Always Show Bookmarks Bar', type: 'checkbox', checked: store.bookmarkBar, accelerator: 'Alt+CmdOrCtrl+B', click: () => setBookmarkBar(!store.bookmarkBar) },
+        { label: 'Always Show Bookmarks Bar', type: 'checkbox', checked: store.bookmarkBar, click: () => setBookmarkBar(!store.bookmarkBar) },
         { type: 'separator' },
         { label: 'Developer Tools', accelerator: 'Alt+CmdOrCtrl+I', click: () => (bounds !== null && wcActive() ? wcActive() : win?.webContents)?.toggleDevTools() },
         { role: 'togglefullscreen' },
@@ -1306,6 +1540,7 @@ async function createWindow() {
     return
   }
   await win.loadURL(APP_URL)
+  if (store.appZoom && store.appZoom !== 1) win.webContents.setZoomFactor(store.appZoom)
   // the parts you had popped out come back on the screens you left them on
   for (const part of Object.keys(store.popouts ?? {})) openPopout(part)
   if (SMOKE) smoke().catch((e) => console.error('smoke failed', e))
@@ -1375,6 +1610,17 @@ async function smoke() {
   win.moveTop()
   app.focus({ steal: true })
   await wait(1500)
+  // the page's boot overlay covers the dock until the layout is built; a busy machine takes a while
+  let bootStalled = true
+  for (let i = 0; i < 40; i++) {
+    if (await win.webContents.executeJavaScript(`!document.querySelector('.boot:not(.gone)')`)) {
+      bootStalled = false
+      break
+    }
+    await wait(500)
+  }
+  // this test is about the browser: a stalled page boot is reported, and its overlay moved aside
+  if (bootStalled) await win.webContents.executeJavaScript(`document.querySelector('.boot')?.classList.add('gone'); 0`)
   const names = ['Work', 'Personal']
   const ids = names.map((n) => store.profiles.find((p) => p.name === n)?.id ?? createProfile(n).id)
   const [a, b] = ids.map((id, i) => openTab(id, `https://httpbin.org/cookies/set/who/${names[i].toLowerCase()}`))
@@ -1410,6 +1656,40 @@ async function smoke() {
   await wait(500)
   bookmarkCheck.renamed = bookmarksOf(b.profile).map((x) => x.title)
   bookmarkCheck.coveredAfterClose = covered
+  // split view: the two tabs side by side, then a split with a new tab that offers the open tabs
+  const onScreen = (t) => !!t.view && win.contentView.children.includes(t.view)
+  // a workbench view (History, Mission, …) left open over the dock would hide the panes: Web closes them
+  await click('#wbn [data-nav="browser"]')
+  splitTab(b, a.id)
+  await wait(1500)
+  await shot('2c-split.png')
+  const splitCheck = {
+    order: tabs.map((x) => x.id).join(','),
+    pair: [b.id, a.id],
+    shown: [onScreen(b), onScreen(a)],
+    rects: [b.view?.getBounds(), a.view?.getBounds()],
+    covered,
+    bounds,
+  }
+  const s0 = splitOf(b.id)
+  s0.ratio = 0.3
+  push()
+  await wait(600)
+  splitCheck.after30 = [b.view.getBounds().width, a.view.getBounds().width]
+  unsplit(b.id)
+  await wait(500)
+  splitCheck.afterUnsplit = { shown: [onScreen(b), onScreen(a)], rect: b.view.getBounds() }
+  splitTab(a)
+  await wait(1200)
+  await shot('2d-split-picker.png')
+  const blank = partnerOf(a.id)
+  splitCheck.picker = await q(`[...document.querySelectorAll('#wb .wb-pick [data-fill]')].map((b) => b.textContent)`)
+  fillSplit(blank.id, b.id)
+  await wait(1200)
+  splitCheck.filled = { blankGone: !tabOf(blank.id), split: splitOf(a.id), shown: [onScreen(a), onScreen(b)] }
+  closeTab(b.id) // closing one half leaves the other, whole
+  await wait(500)
+  splitCheck.afterClose = { active: active === a.id, splits: splits.length, rect: a.view.getBounds(), bounds }
   openTab(ids[0])
   cmd('focus-omnibox')
   await wait(900)
@@ -1453,7 +1733,7 @@ async function smoke() {
   await wait(2500)
   const fileTab = { typed: local, url: ft.url, title: ft.title, failed: ft.failed }
   await shot('8-local-file.png')
-  await writeFile(join(dir, 'result.json'), JSON.stringify({ ...r, reopen: { viewWhileClosed: closedView, visibleAfterMs: reopenMs }, fileTab, bookmarkCheck }, null, 2))
+  await writeFile(join(dir, 'result.json'), JSON.stringify({ ...r, reopen: { viewWhileClosed: closedView, visibleAfterMs: reopenMs }, fileTab, bookmarkCheck, splitCheck, bootStalled }, null, 2))
   await wait(300)
   app.quit()
 }

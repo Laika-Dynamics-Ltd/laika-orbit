@@ -3,6 +3,8 @@
  * Mounted twice — as the drawer inside the brain map (`c`) and as the standalone /control
  * page. Data comes from /api/control/* (control-api.mjs); everything is local to this machine.
  */
+
+import * as presence from './activity.ts'
 import { makeSpans, type Span } from './spanview.ts'
 
 export type Session = {
@@ -221,7 +223,7 @@ export function mountControl(
   let activity: Activity[] = []
   let ports: Listener[] = []
   const notifier = sessionNotifier()
-  const timers: ReturnType<typeof setInterval>[] = []
+  const timers: (() => void)[] = []
 
   const scrollTo = (s: Session) =>
     root.querySelector(`[data-id="${CSS.escape(s.id)}"]`)?.scrollIntoView({ block: 'center' })
@@ -443,13 +445,13 @@ export function mountControl(
       loadSessions()
       loadSlow()
       timers.push(
-        setInterval(loadSessions, 5_000),
-        setInterval(loadSlow, 60_000),
-        setInterval(render, 30_000),
+        presence.every(5_000, loadSessions, { now: false }),
+        presence.every(60_000, loadSlow, { now: false }),
+        presence.every(30_000, render, { now: false }),
       )
     },
     stop() {
-      for (const t of timers.splice(0)) clearInterval(t)
+      for (const stop of timers.splice(0)) stop()
     },
   }
 }

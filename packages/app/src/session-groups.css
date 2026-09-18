@@ -7,8 +7,11 @@
 .ws-changes > .sc { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 14px 20px }
 
 /* ------------------------------------------------------------ groups */
-.ws-cols { position: relative; flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) }
-.ws-col { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column }
+.ws-cols { position: relative; flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); overflow: auto; overscroll-behavior-x: contain; scrollbar-width: thin }
+/* a group scrolled out of view is neither laid out nor painted (sessions.ts layoutCols floors the
+   tracks, so past what fits the row scrolls rather than squashing); when activity.ts gains element
+   visibility, its log drawing should pause here too */
+.ws-col { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; content-visibility: auto; contain-intrinsic-size: auto 200px auto 400px }
 .ws-cols.split .ws-col + .ws-col { border-left: 1px solid var(--c-line) }
 .ws-gbody { flex: 1; min-height: 0; display: flex; flex-direction: column }
 .ws-cols.split .ws-col:not(.focus) .ws-gbody { opacity: 0.82; transition: opacity 0.15s }
@@ -420,14 +423,33 @@ header .cu + .status { margin-left: 0 }
 #ss .m-agent-lbl { margin-bottom: 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--c-faint) }
 
 /* ------------------------------------------------------------ two workspaces side by side */
-#ss .ss-pane.duo { flex-direction: row; width: 100% !important; max-width: none }
-#ss .ss-pane.duo > .ws { min-width: 0 }
+#ss .ss-pane.duo { flex-direction: row; width: 100% !important; max-width: none; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin }
+/* a project column never goes under its groups' floors (--ws-min, from layoutCols): past what
+   fits, the columns scroll, and one scrolled out of view is not laid out or painted */
+#ss .ss-pane.duo > .ws { min-width: var(--ws-min, 0px); content-visibility: auto; contain-intrinsic-size: auto 400px auto 600px }
 #ss .ss-pane.duo > .ws { flex: 1 1 0 }
 #ss .ss-pane.duo > .ws:not(.ws-active) { border-top-color: color-mix(in srgb, var(--ws) 45%, transparent) }
 #ss .ss-pane.duo > .ws:not(.ws-active) .ws-gbody { opacity: 0.86 }
 /* spread across the screen, each folder says which it is */
-#ss .ss-pane.duo > .ws::before { content: attr(data-name); flex: none; padding: 4px 12px; overflow: hidden; border-bottom: 1px solid var(--c-line); background: color-mix(in srgb, var(--ws) 12%, transparent); color: var(--ws); font: 600 11.5px/16px ui-sans-serif, -apple-system, system-ui, sans-serif; letter-spacing: 0.02em; white-space: nowrap; text-overflow: ellipsis }
-#ss .ss-pane.duo > .ws:not(.ws-active)::before { background: color-mix(in srgb, var(--ws) 6%, transparent); color: color-mix(in srgb, var(--ws) 65%, var(--c-dim)) }
+.ws-head { display: none }
+#ss .ss-pane.duo > .ws > .ws-head { flex: none; display: flex; align-items: center; gap: 6px; padding: 0 4px 0 12px; height: 24px; border-bottom: 1px solid var(--c-line); background: color-mix(in srgb, var(--ws) 12%, transparent); color: var(--ws); font: 600 11.5px/16px ui-sans-serif, -apple-system, system-ui, sans-serif; letter-spacing: 0.02em }
+#ss .ss-pane.duo > .ws:not(.ws-active) > .ws-head { background: color-mix(in srgb, var(--ws) 6%, transparent); color: color-mix(in srgb, var(--ws) 65%, var(--c-dim)) }
+#ss .ws-head > span { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis }
+/* a column scrolled half out of view keeps its name and its × on the part you can see */
+#ss .ss-pane.duo > .ws > .ws-head > span { position: sticky; left: 12px; flex: 0 1 auto; margin-right: auto }
+#ss .ss-pane.duo > .ws > .ws-head > .ws-head-x { position: sticky; right: 4px }
+/* × on hover (and whenever it has the keyboard): the column leaves, its chats keep running */
+#ss .ws-head-x { flex: none; display: grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--c-dim); font: 400 14px/1 ui-sans-serif, -apple-system, system-ui, sans-serif; cursor: pointer; opacity: 0; transition: opacity 0.12s, background-color 0.12s }
+#ss .ws-head:hover .ws-head-x, #ss .ws-head-x:focus-visible { opacity: 1 }
+#ss .ws-head-x:hover { background: color-mix(in srgb, var(--c-text) 12%, transparent); color: var(--c-text) }
+/* drag a column by its name bar: it lifts, the others slide over, a line marks where it lands */
+#ss .ss-pane.duo > .ws > .ws-head { cursor: grab; user-select: none; touch-action: none }
+#ss .ss-pane.side-drag, #ss .ss-pane.side-drag .ws-head { cursor: grabbing }
+#ss .ss-pane.side-drag > .ws { pointer-events: none; transition: transform 0.2s cubic-bezier(0.2, 0.7, 0.2, 1) }
+#ss .ss-pane.side-drag > .ws.side-lifted { z-index: 5; transition: none; box-shadow: 0 10px 32px rgb(0 0 0 / 0.35); outline: 1px solid color-mix(in srgb, var(--ws) 60%, transparent) }
+#ss .ss-pane.side-drag > .ws-duo-grip { opacity: 0 }
+.ws-side-mark { position: fixed; z-index: 60; width: 3px; border-radius: 2px; background: var(--c-turn); box-shadow: 0 0 10px var(--c-turn); pointer-events: none }
+.ws-side-mark[hidden] { display: none }
 .ws-duo-grip { position: relative; flex: none; width: 6px; cursor: col-resize; touch-action: none; background: var(--c-line) }
 .ws-duo-grip::after { content: ''; position: absolute; inset: 0 2px; border-radius: 2px; transition: background-color 0.12s }
 .ws-duo-grip:hover::after, .ws-duo-grip.drag::after { background: var(--c-turn) }

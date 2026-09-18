@@ -1,8 +1,8 @@
 /**
- * The Showreel window: Showreel Studio (script, voice, film, setup) inside 1brain.
+ * The Showreel window: Showreel Studio (script, voice, film, setup) inside Laika Orbit.
  *
  * The studio's page is laika-showreel's own, loaded from that checkout and drawn in a shadow
- * root, so its styles and 1brain's cannot reach each other. showreel-embed.css maps its colours
+ * root, so its styles and Laika Orbit's cannot reach each other. showreel-embed.css maps its colours
  * onto the active theme and turns its scrolling page into a window. The API is the server's
  * /api/showreel mount.
  */
@@ -67,7 +67,7 @@ export function openShowreel() {
     overlay.addEventListener('pointerdown', (e) => {
       if (e.target === overlay) closeShowreel()
     })
-    // typing in the studio must not reach 1brain's single-key shortcuts, which see the shadow
+    // typing in the studio must not reach Laika Orbit's single-key shortcuts, which see the shadow
     // host rather than the field
     overlay.addEventListener('keydown', (e) => e.stopPropagation())
     document.body.appendChild(overlay)

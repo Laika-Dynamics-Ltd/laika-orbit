@@ -22,7 +22,7 @@ export const THEMES: Theme[] = [
   { id: 'paper', name: 'Paper', blurb: 'Ink on warm white, for daylight', light: true },
 ]
 
-const KEY = '1brain:theme'
+const KEY = 'orbit:theme'
 const DEFAULT = 'midnight'
 const listeners = new Set<(id: string) => void>()
 

@@ -339,6 +339,8 @@ export function createCore(scene: THREE.Scene, stage: HTMLElement) {
     recall,
     update,
     clear,
+    /** true while the recall path shows: its beams move every frame */
+    animating: () => active && started > 0 && performance.now() - started < 11_500,
     setActive(on: boolean) {
       active = on
       apply()

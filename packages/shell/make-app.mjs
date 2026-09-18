@@ -25,8 +25,8 @@ const ROOT = resolve(HERE, '../..')
 // the stable build (make-stable.mjs) sets these; plain `pnpm shell:app` builds the usual app
 const NAME = process.env.LAIKA_APP_NAME ?? 'Laika Orbit'
 const PORT = Number(process.env.LAIKA_APP_PORT ?? 5200)
-const USER_DATA = process.env.LAIKA_USER_DATA ?? 'laika-1brain'
-const BUNDLE_ID = process.env.LAIKA_BUNDLE_ID ?? 'com.laikadynamics.1brain'
+const USER_DATA = process.env.LAIKA_USER_DATA ?? 'Laika Orbit'
+const BUNDLE_ID = process.env.LAIKA_BUNDLE_ID ?? 'com.laikadynamics.laikaorbit'
 const BRAIN_ROOT = process.env.LAIKA_BRAIN_ROOT ?? null
 const STABLE = process.env.LAIKA_STABLE === '1'
 const DIST = join(ROOT, 'dist')
@@ -108,7 +108,7 @@ spawnSync('codesign', ['--force', '--deep', '--sign', '-', APP], { stdio: 'ignor
 
 // ------------------------------------------------------------------- install ----
 step('installing')
-// The app was called something else before (laika-1brain). A copy under an old name with this
+// The app was called something else before. A copy under an old name with this
 // bundle id is the same app: it goes, and its Dock tile is pointed at the new one in place.
 const renamed = []
 for (const dir of ['/Applications', join(homedir(), 'Applications')]) {

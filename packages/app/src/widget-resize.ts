@@ -26,7 +26,7 @@ const RAIL_MIN = 220
 const RAIL_MAX = 620
 /** within this many px of a rail's default width, it sticks to the default */
 const SNAP_RAIL = 12
-const KEY = (side: 'l' | 'r') => `1brain:rail-${side}-w`
+const KEY = (side: 'l' | 'r') => `orbit:rail-${side}-w`
 
 let resizing = false
 export const isResizing = () => resizing

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * `pnpm shell` — opens laika-1brain in its own Chromium window.
+ * `pnpm shell` — opens Laika Orbit in its own Chromium window.
  *
  * A plain launcher rather than `electron .`, because a terminal that is itself inside an
  * Electron app (VS Code, Cursor, the Claude desktop app) exports ELECTRON_RUN_AS_NODE=1,

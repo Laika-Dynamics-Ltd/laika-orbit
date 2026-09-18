@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<title>Laika Orbit · live profile</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --surface-0: #121211;
+    --surface-1: #1a1a19;
+    --border: #2c2c2a;
+    --grid: #262624;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #8d8c84;
+    --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70;
+    --series-4: #c98500; --series-5: #d55181; --series-6: #008300;
+    --warn: #c98500; --crit: #e66767; --good: #199e70;
+  }
+  * { box-sizing: border-box }
+  body { margin: 0; background: var(--surface-0); color: var(--text-primary); font: 13px/1.45 -apple-system, "SF Pro Text", Inter, sans-serif }
+  .viz-root { max-width: 1280px; margin: 0 auto; padding: 22px 28px 40px }
+  header { display: flex; align-items: baseline; gap: 14px; margin-bottom: 16px }
+  h1 { font-size: 19px; font-weight: 600; margin: 0 }
+  .sub { color: var(--text-muted) }
+  .live { display: inline-flex; align-items: center; gap: 6px; color: var(--text-secondary); margin-left: auto }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--good); animation: pulse 1s infinite }
+  .dot.off { background: var(--crit); animation: none }
+  @keyframes pulse { 50% { opacity: .35 } }
+  .tiles { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 14px }
+  .tile, .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px }
+  .tile { padding: 12px 14px }
+  .tile .k { color: var(--text-muted); font-size: 12px }
+  .tile .v { font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 2px }
+  .tile .n { color: var(--text-secondary); font-size: 12px; font-variant-numeric: tabular-nums }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px }
+  .card { padding: 14px 16px; position: relative }
+  .card h2 { font-size: 14px; font-weight: 600; margin: 0 0 2px }
+  .card .hint { color: var(--text-muted); font-size: 12px; margin-bottom: 8px }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; color: var(--text-secondary); font-size: 12px; margin-bottom: 6px }
+  .legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 3px; background: var(--c); margin-right: 5px; vertical-align: -1px }
+  svg { display: block; width: 100%; overflow: visible }
+  svg text { fill: var(--text-muted); font-size: 11px; font-variant-numeric: tabular-nums }
+  .tip { position: absolute; pointer-events: none; background: #0b0b0b; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 12px; min-width: 170px; display: none; z-index: 5; box-shadow: 0 6px 20px #0008 }
+  .tip .row { display: flex; gap: 8px; color: var(--text-secondary) } .tip .row b { margin-left: auto; color: var(--text-primary); font-weight: 500; font-variant-numeric: tabular-nums }
+  .tip .sw { width: 8px; height: 8px; border-radius: 2px; margin-top: 5px }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums }
+  th { text-align: left; color: var(--text-muted); font-weight: 500; font-size: 12px; padding: 6px 8px; border-bottom: 1px solid var(--border) }
+  th.r, td.r { text-align: right }
+  td { white-space: nowrap; padding: 6px 8px; border-bottom: 1px solid var(--grid); color: var(--text-secondary) }
+  td.name { color: var(--text-primary) }
+  td .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 7px }
+  .bar { height: 6px; background: var(--grid); border-radius: 3px; width: 80px; display: inline-block; vertical-align: middle; margin-left: 8px; overflow: hidden }
+  .bar i { display: block; height: 100% ; border-radius: 3px }
+  .findings li { margin: 0 0 8px; color: var(--text-secondary) } .findings b { color: var(--text-primary); font-weight: 600 }
+  .findings ul { margin: 6px 0 0; padding-left: 18px }
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 7px; overflow: hidden }
+  .seg button { background: none; border: 0; color: var(--text-secondary); padding: 4px 10px; font: inherit; cursor: pointer }
+  .seg button.on { background: var(--border); color: var(--text-primary) }
+  .bench { margin-bottom: 14px }
+  .bench table { font-size: 12px; table-layout: auto } .bench td, .bench th { padding: 6px 5px } .bench td.name { white-space: normal; min-width: 180px } .bench .delta { display: block; margin: 0 }
+  .bench-bar { display: flex; gap: 8px; align-items: center; margin: 8px 0 12px }
+  .bench-bar input, .bench-bar select { background: var(--surface-0); border: 1px solid var(--border); color: var(--text-primary); border-radius: 7px; padding: 6px 9px; font: inherit }
+  .bench-bar input { width: 320px }
+  .btn { background: var(--text-primary); color: #0b0b0b; border: 0; border-radius: 7px; padding: 6px 12px; font: inherit; font-weight: 600; cursor: pointer }
+  .btn.ghost { background: none; color: var(--text-secondary); border: 1px solid var(--border); font-weight: 500 }
+  .btn:disabled { opacity: .4; cursor: default }
+  .prog { flex: 1; height: 6px; background: var(--grid); border-radius: 3px; overflow: hidden; max-width: 260px }
+  .prog i { display: block; height: 100%; background: var(--series-1); border-radius: 3px; transition: width .9s linear }
+  .delta { font-size: 11px; margin-left: 5px }
+  .delta.better { color: var(--good) } .delta.worse { color: var(--crit) } .delta.same { color: var(--text-muted) }
+  .tag { font-size: 11px; color: var(--text-muted); border: 1px solid var(--border); border-radius: 5px; padding: 0 5px; margin-left: 6px }
+  .link { background: none; border: 0; color: var(--text-muted); cursor: pointer; font: inherit; padding: 0 4px } .link:hover { color: var(--text-primary) }
+  .ab-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 8px }
+  .ab-sc h3 { font-size: 13px; font-weight: 600; margin: 0 0 8px; color: var(--text-primary) }
+  .ab-row { display: grid; grid-template-columns: 118px 1fr 64px; gap: 8px; align-items: center; margin: 6px 0; font-size: 12px; color: var(--text-secondary) }
+  .ab-track { height: 14px; background: var(--grid); border-radius: 4px; overflow: hidden; display: flex; gap: 2px }
+  .ab-track i { display: block; height: 100% }
+  .ab-track i:first-child { border-radius: 4px 0 0 4px } .ab-track i:last-child { border-radius: 0 4px 4px 0 }
+  .ab-row b { color: var(--text-primary); font-weight: 600; text-align: right; font-variant-numeric: tabular-nums }
+  .ab-meta { font-size: 11.5px; color: var(--text-muted); margin: -2px 0 4px 126px; font-variant-numeric: tabular-nums }
+  .ab-meta .better { color: var(--good) } .ab-meta .worse { color: var(--crit) }
+</style>
+</head>
+<body>
+<div class="viz-root">
+  <header>
+    <h1>Laika Orbit · live profile</h1>
+    <span class="sub">Sampled from outside the app once a second · CPU in % of one core</span>
+    <span class="seg" id="win"><button data-s="60" class="on">1 min</button><button data-s="300">5 min</button><button data-s="600">10 min</button></span>
+    <span class="live"><i class="dot" id="dot"></i><span id="status">connecting…</span></span>
+  </header>
+
+  <div class="tiles">
+    <div class="tile"><div class="k">App CPU (all processes)</div><div class="v" id="t-cpu">–</div><div class="n" id="t-cpu-n"></div></div>
+    <div class="tile"><div class="k">App window renderer</div><div class="v" id="t-ren">–</div><div class="n" id="t-ren-n"></div></div>
+    <div class="tile"><div class="k">App memory (resident)</div><div class="v" id="t-mem">–</div><div class="n" id="t-mem-n"></div></div>
+    <div class="tile"><div class="k">Server response (GET /)</div><div class="v" id="t-lat">–</div><div class="n" id="t-lat-n"></div></div>
+    <div class="tile"><div class="k">System load (1 min)</div><div class="v" id="t-load">–</div><div class="n" id="t-load-n"></div></div>
+  </div>
+
+  <div class="grid2">
+    <div class="card" id="c-cpu"><h2>CPU by component</h2><div class="hint">Stacked, % of one core</div><div class="legend" id="lg-cpu"></div><svg id="s-cpu" viewBox="0 0 600 240"></svg><div class="tip"></div></div>
+    <div class="card" id="c-mem"><h2>Memory by component</h2><div class="hint">Stacked, resident memory</div><div class="legend" id="lg-mem"></div><svg id="s-mem" viewBox="0 0 600 240"></svg><div class="tip"></div></div>
+  </div>
+
+  <div class="card bench" id="ab-card"><h2>3D map: before / after</h2>
+    <div class="hint" id="ab-hint">Isolated copies of the app (base commit vs each change), headless Chromium on this Mac's GPU at 3440×1440, one 60 s window per bar after the map has sat idle past its 20 s threshold. Bars: renderer CPU + GPU process CPU, % of one core.</div>
+    <div class="legend"><span style="--c:var(--series-1)">Renderer CPU</span><span style="--c:var(--series-2)">GPU process CPU</span></div>
+    <div class="ab-grid" id="ab-grid"><div class="sub">Waiting for the first run…</div></div>
+  </div>
+
+  <div class="card bench"><h2>Benchmarks</h2>
+    <div class="hint">Record a fixed window with the app in the same state (same view, same chats open), change something, record again. Deltas compare to the baseline; green is better. “App CPU” leaves out chat agents and their tools, which vary with whatever the chats are doing. Use 60 s or longer: with nothing changed, a 10 s run differed from the baseline by up to 25%.</div>
+    <div class="bench-bar">
+      <input id="b-label" placeholder="Label, e.g. map view · before fix" />
+      <select id="b-secs"><option value="30">30 s</option><option value="60" selected>60 s</option><option value="120">2 min</option><option value="300">5 min</option></select>
+      <button class="btn" id="b-start">Record benchmark</button>
+      <button class="btn ghost" id="b-stop" hidden>Cancel</button>
+      <span class="prog" id="b-prog" hidden><i style="width:0"></i></span><span class="sub" id="b-status"></span>
+    </div>
+    <table><thead><tr><th>Run</th><th>When</th><th class="r">App CPU avg</th><th class="r">App CPU p95</th><th class="r">Window renderer</th><th class="r">GPU</th><th class="r">Electron main</th><th class="r">Server</th><th class="r">App memory</th><th class="r">Server p95</th><th class="r">Chats CPU</th><th class="r">System load</th><th></th></tr></thead><tbody id="b-rows"><tr><td colspan="13" style="color:var(--text-muted)">No runs yet</td></tr></tbody></table>
+  </div>
+
+  <div class="grid2">
+    <div class="card"><h2>Processes</h2><div class="hint">Now, average and peak over the window</div>
+      <table><thead><tr><th>Process</th><th class="r">PID</th><th class="r">CPU now</th><th class="r">Avg</th><th class="r">Peak</th><th class="r">Memory</th></tr></thead><tbody id="rows"></tbody></table>
+    </div>
+    <div class="card findings"><h2>What the profile shows</h2><div class="hint" id="f-when"></div><div id="findings"></div></div>
+  </div>
+</div>
+
+<script>
+const GROUPS = [
+  ['renderer', 'Renderers', 'var(--series-1)'],
+  ['gpu', 'GPU process', 'var(--series-2)'],
+  ['main', 'Electron main', 'var(--series-3)'],
+  ['server', 'App server', 'var(--series-4)'],
+  ['agents', 'Chats (agents + their tools)', 'var(--series-5)'],
+  ['other', 'Utilities / other', 'var(--series-6)'],
+]
+let data = []
+let win = 60
+const $ = (id) => document.getElementById(id)
+const fmtMB = (b) => (b >= 1024 ** 3 ? `${(b / 1024 ** 3).toFixed(2)} GB` : `${Math.round(b / 1024 ** 2)} MB`)
+const sum = (a) => a.reduce((x, y) => x + y, 0)
+
+for (const id of ['lg-cpu', 'lg-mem']) $(id).innerHTML = GROUPS.map(([, l, c]) => `<span style="--c:${c}">${l}</span>`).join('')
+$('win').onclick = (e) => { if (!e.target.dataset.s) return; win = +e.target.dataset.s; for (const b of $('win').children) b.classList.toggle('on', b === e.target); render() }
+
+const byGroup = (s, key) => Object.fromEntries(GROUPS.map(([g]) => [g, sum(s.procs.filter((p) => p.group === g).map((p) => p[key]))]))
+
+function niceMax(v) { const m = 10 ** Math.floor(Math.log10(v || 1)); return Math.ceil(v / m / (v / m > 5 ? 2 : 1)) * m * (v / m > 5 ? 2 : 1) }
+
+function chart(svgId, key, fmt) {
+  const svg = $(svgId), W = 600, H = 240, L = 44, R = 8, T = 6, B = 22
+  const pts = data.filter((s) => s.t >= Date.now() - win * 1000)
+  if (!pts.length) return
+  const stacks = pts.map((s) => byGroup(s, key))
+  const tot = stacks.map((g) => sum(Object.values(g)))
+  const max = niceMax(Math.max(...tot) * 1.05)
+  const t1 = Date.now(), t0 = t1 - win * 1000
+  const x = (t) => L + ((t - t0) / (t1 - t0)) * (W - L - R)
+  const y = (v) => H - B - (v / max) * (H - T - B)
+  let out = ''
+  for (let i = 0; i <= 4; i++) { const v = (max / 4) * i; out += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--grid)"/><text x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${fmt(v, true)}</text>` }
+  for (let s = 0; s <= win; s += win / 5) out += `<text x="${x(t1 - s * 1000)}" y="${H - 4}" text-anchor="middle">${s ? `-${s >= 60 ? `${s / 60}m` : `${s}s`}` : 'now'}</text>`
+  const base = pts.map(() => 0)
+  GROUPS.forEach(([g, , c]) => {
+    const top = base.map((b, i) => b + stacks[i][g])
+    const up = pts.map((s, i) => `${x(s.t).toFixed(1)},${y(top[i]).toFixed(1)}`)
+    const down = pts.map((s, i) => `${x(s.t).toFixed(1)},${y(base[i]).toFixed(1)}`).reverse()
+    out += `<polygon points="${up.join(' ')} ${down.join(' ')}" fill="${c}" fill-opacity=".82" stroke="var(--surface-1)" stroke-width="1"/>`
+    top.forEach((v, i) => (base[i] = v))
+  })
+  out += `<line class="xh" y1="${T}" y2="${H - B}" stroke="var(--text-muted)" stroke-dasharray="3 3" visibility="hidden"/><rect x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}" fill="transparent" class="hit"/>`
+  svg.innerHTML = out
+  const card = svg.parentElement, tip = card.querySelector('.tip'), xh = svg.querySelector('.xh')
+  svg.querySelector('.hit').onmousemove = (e) => {
+    const r = svg.getBoundingClientRect(), sx = ((e.clientX - r.left) / r.width) * W
+    const t = t0 + ((sx - L) / (W - L - R)) * (t1 - t0)
+    let i = 0; for (let j = 0; j < pts.length; j++) if (Math.abs(pts[j].t - t) < Math.abs(pts[i].t - t)) i = j
+    xh.setAttribute('x1', x(pts[i].t)); xh.setAttribute('x2', x(pts[i].t)); xh.setAttribute('visibility', 'visible')
+    tip.style.display = 'block'
+    tip.innerHTML = `<div style="color:var(--text-muted);margin-bottom:4px">${new Date(pts[i].t).toLocaleTimeString()} · total <b style="color:var(--text-primary)">${fmt(tot[i])}</b></div>` +
+      [...GROUPS].reverse().map(([g, l, c]) => `<div class="row"><i class="sw" style="background:${c}"></i>${l}<b>${fmt(stacks[i][g])}</b></div>`).join('')
+    const cr = card.getBoundingClientRect(), px = e.clientX - cr.left
+    tip.style.left = `${px > cr.width / 2 ? px - tip.offsetWidth - 14 : px + 14}px`; tip.style.top = `${e.clientY - cr.top + 10}px`
+  }
+  svg.querySelector('.hit').onmouseleave = () => { tip.style.display = 'none'; xh.setAttribute('visibility', 'hidden') }
+}
+
+function render() {
+  const pts = data.filter((s) => s.t >= Date.now() - win * 1000)
+  const s = data.at(-1)
+  if (!s) return
+  const cpuPct = (v, axis) => `${axis ? Math.round(v) : v.toFixed(v < 10 ? 1 : 0)}%`
+  chart('s-cpu', 'cpu', cpuPct)
+  chart('s-mem', 'rss', (v) => fmtMB(v))
+  const totals = pts.map((p) => sum(p.procs.map((q) => q.cpu)))
+  const nowCpu = sum(s.procs.map((p) => p.cpu))
+  $('t-cpu').textContent = cpuPct(nowCpu)
+  $('t-cpu-n').textContent = `avg ${sum(totals) / totals.length | 0}% · ${(nowCpu / 100).toFixed(1)} of ${s.cores} cores`
+  const ren = s.procs.find((p) => p.label.startsWith('Renderer · app window'))
+  const renAvg = pts.map((p) => p.procs.find((q) => ren && q.pid === ren.pid)?.cpu ?? 0)
+  $('t-ren').textContent = ren ? cpuPct(ren.cpu) : '–'
+  $('t-ren-n').textContent = ren ? `avg ${(sum(renAvg) / renAvg.length).toFixed(0)}% · ${fmtMB(ren.rss)}` : ''
+  $('t-mem').textContent = fmtMB(sum(s.procs.map((p) => p.rss)))
+  $('t-mem-n').textContent = `${s.procs.length} processes`
+  const lats = pts.map((p) => p.latency?.ms).filter((v) => v != null).sort((a, b) => a - b)
+  $('t-lat').textContent = s.latency?.ms != null ? `${s.latency.ms.toFixed(0)} ms` : 'down'
+  $('t-lat').style.color = s.latency?.ms == null ? 'var(--crit)' : ''
+  $('t-lat-n').textContent = lats.length ? `p50 ${lats[lats.length >> 1].toFixed(0)} ms · p95 ${lats[Math.floor(lats.length * 0.95)].toFixed(0)} ms` : ''
+  $('t-load').textContent = s.load.toFixed(1)
+  $('t-load-n').textContent = `${s.cores} cores · ${s.load > s.cores ? 'machine is saturated' : 'headroom available'}`
+  const stats = new Map()
+  for (const p of pts) for (const q of p.procs) { const e = stats.get(q.pid) ?? { sum: 0, n: 0, peak: 0 }; e.sum += q.cpu; e.n++; e.peak = Math.max(e.peak, q.cpu); stats.set(q.pid, e) }
+  const color = Object.fromEntries(GROUPS.map(([g, , c]) => [g, c]))
+  const rows = [...s.procs].sort((a, b) => stats.get(b.pid).sum / stats.get(b.pid).n - stats.get(a.pid).sum / stats.get(a.pid).n || b.rss - a.rss)
+  const shown = rows.slice(0, 14)
+  $('rows').innerHTML = shown.map((p) => { const e = stats.get(p.pid); return `<tr><td class="name"><i class="sw" style="background:${color[p.group]}"></i>${p.label}</td><td class="r">${p.pid}</td><td class="r">${p.cpu.toFixed(1)}%<span class="bar"><i style="width:${Math.min(100, p.cpu)}%;background:${color[p.group]}"></i></span></td><td class="r">${(e.sum / e.n).toFixed(1)}%</td><td class="r">${e.peak.toFixed(0)}%</td><td class="r">${fmtMB(p.rss)}</td></tr>` }).join('') +
+    (rows.length > shown.length ? `<tr><td colspan="6" style="color:var(--text-muted)">+ ${rows.length - shown.length} idle processes</td></tr>` : '')
+}
+
+const es = new EventSource('/stream')
+es.addEventListener('history', (e) => { data = JSON.parse(e.data); render() })
+es.onmessage = (e) => { data.push(JSON.parse(e.data)); if (data.length > 600) data.shift(); render(); $('status').textContent = `live · ${data.length}s recorded` }
+es.onopen = () => $('dot').classList.remove('off')
+es.onerror = () => { $('dot').classList.add('off'); $('status').textContent = 'disconnected' }
+
+// ── benchmarks ──
+const COLS = [
+  ['appCpu', (v) => `${v.toFixed(0)}%`, true],
+  ['appCpuP95', (v) => `${v.toFixed(0)}%`, true],
+  ['window', (v) => `${v.toFixed(0)}%`, true],
+  ['gpu', (v) => `${v.toFixed(0)}%`, true],
+  ['main', (v) => `${v.toFixed(1)}%`, true],
+  ['server', (v) => `${v.toFixed(1)}%`, true],
+  ['memGB', (v) => `${v.toFixed(2)} GB`, true],
+  ['latP95', (v) => `${v.toFixed(0)} ms`, true],
+  ['chats', (v) => `${v.toFixed(0)}%`, false],
+  ['load', (v) => v.toFixed(1), false],
+]
+let benchTimer = null
+function renderBench(st) {
+  const a = st.active
+  $('b-start').disabled = !!a; $('b-stop').hidden = !a; $('b-prog').hidden = !a
+  clearInterval(benchTimer)
+  if (a) {
+    const upd = () => { const el = Math.min(a.secs, (Date.now() - a.startedAt) / 1000); $('b-prog').firstElementChild.style.width = `${(el / a.secs) * 100}%`; $('b-status').textContent = `Recording “${a.label}” · ${Math.ceil(a.secs - el)}s left — keep the app as it is` }
+    upd(); benchTimer = setInterval(upd, 500)
+  } else $('b-status').textContent = ''
+  const base = st.runs.find((r) => r.baseline)
+  $('b-rows').innerHTML = st.runs.length ? [...st.runs].reverse().map((r) => {
+    const cells = COLS.map(([k, f, compare]) => {
+      if (r[k] == null) return '<td class="r">–</td>'
+      let d = ''
+      if (compare && base && base !== r && base[k] != null) {
+        const ch = base[k] ? ((r[k] - base[k]) / base[k]) * 100 : 0
+        const cls = Math.abs(ch) < 5 ? 'same' : ch < 0 ? 'better' : 'worse'
+        d = `<span class="delta ${cls}">${ch > 0 ? '+' : ''}${ch.toFixed(0)}%</span>`
+      }
+      return `<td class="r">${f(r[k])}${d}</td>`
+    }).join('')
+    return `<tr><td class="name">${r.label.replace(/</g, '&lt;')}${r.baseline ? '<span class="tag">baseline</span>' : ''}</td><td>${new Date(r.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · ${r.secs}s</td>${cells}<td class="r">${r.baseline ? '' : `<button class="link" title="Set as baseline" data-base="${r.id}">★</button>`}<button class="link" title="Delete run" data-del="${r.id}">✕</button></td></tr>`
+  }).join('') : '<tr><td colspan="13" style="color:var(--text-muted)">No runs yet</td></tr>'
+}
+const post = (path) => fetch(path, { method: 'POST' }).then((r) => r.json()).then(renderBench)
+$('b-start').onclick = () => post(`/bench/start?secs=${$('b-secs').value}&label=${encodeURIComponent($('b-label').value)}`)
+$('b-stop').onclick = () => post('/bench/stop')
+$('b-rows').onclick = (e) => {
+  if (e.target.dataset.base) post(`/bench/baseline?id=${e.target.dataset.base}`)
+  if (e.target.dataset.del && confirm('Delete this run?')) post(`/bench/delete?id=${e.target.dataset.del}`)
+}
+es.addEventListener('bench', (e) => renderBench(JSON.parse(e.data)))
+
+// ── map A/B ──
+async function loadAB() {
+  let doc
+  try { doc = await (await fetch('/ab.json', { cache: 'no-store' })).json() } catch { return }
+  if (!doc.runs?.length) return
+  const labels = [...new Set(doc.runs.map((r) => r.label))]
+  const max = Math.max(...doc.runs.map((r) => r.renderer + r.gpu), 1)
+  $('ab-grid').innerHTML = Object.entries(doc.scenarios).filter(([k]) => doc.runs.some((r) => r.scenario === k)).map(([k, name]) => {
+    const base = doc.runs.find((r) => r.scenario === k && r.label === labels[0])
+    const rows = labels.map((l) => {
+      const r = doc.runs.find((x) => x.scenario === k && x.label === l)
+      if (!r) return `<div class="ab-row"><span>${l}</span><div class="ab-track"></div><b class="sub">pending</b></div>`
+      const tot = r.renderer + r.gpu
+      let delta = ''
+      if (base && base !== r) {
+        const ch = ((tot - (base.renderer + base.gpu)) / (base.renderer + base.gpu)) * 100
+        delta = ` · <span class="${ch < -5 ? 'better' : ch > 5 ? 'worse' : ''}">${ch > 0 ? '+' : ''}${ch.toFixed(0)}% CPU vs baseline</span>`
+      }
+      return `<div class="ab-row" title="${l}: renderer ${r.renderer.toFixed(1)}%, GPU ${r.gpu.toFixed(1)}%"><span>${l}</span><div class="ab-track"><i style="width:${(r.renderer / max) * 100}%;background:var(--series-1)"></i><i style="width:${(r.gpu / max) * 100}%;background:var(--series-2)"></i></div><b>${tot.toFixed(0)}%</b></div>
+        <div class="ab-meta">${r.framesPerSec.toFixed(1)} frames/s · ${Math.round(r.drawsPerSec).toLocaleString()} draws/s · load ${r.load.toFixed(1)}${delta}</div>`
+    }).join('')
+    return `<div class="ab-sc"><h3>${name}</h3>${rows}</div>`
+  }).join('')
+}
+loadAB(); setInterval(loadAB, 5000)
+
+async function loadFindings() {
+  try {
+    const f = await (await fetch('/findings.json', { cache: 'no-store' })).json()
+    $('f-when').textContent = f.when
+    $('findings').innerHTML = `<ul>${f.items.map((i) => `<li>${i}</li>`).join('')}</ul>`
+  } catch {}
+}
+loadFindings(); setInterval(loadFindings, 5000)
+</script>
+</body>
+</html>

@@ -7,7 +7,7 @@ JSON is a first-class integration. No code change, no rebuild.
 ```jsonc
 {
   "id": "calendar",              // unique; also the filename
-  "kind": "list",                // calendar | metric | table | deck | applist | list | feed | links
+  "kind": "list",                // calendar | metric | table | deck | applist | list | feed | links | summary
   "title": "Calendar",
   "icon": "calendar",            // optional title glyph; defaults by kind (see Icons)
   "source": "google-calendar",   // free text, shown in the footer
@@ -70,6 +70,14 @@ JSON is a first-class integration. No code change, no rebuild.
 
 Known `action` values: `brain-window` (opens the Brain index window). An unknown action
 renders as a button that does nothing, so a widget file can name one before the app ships it.
+
+## Summary
+
+`summary.json` is written by the chat host's summary routine (`packages/app/summary.mjs`) at the
+top of each hour and when away mode ends; it is git-ignored. `config.summary` holds the page
+(needs you, running with ETAs, finished, auto-approved and recovered), `config.recap` the last time
+away while it is under 12 hours old, and `config.nextAt` when the next one is written. Its `now`
+action (`summary-now`) writes one straight away.
 
 ## Calendar events
 

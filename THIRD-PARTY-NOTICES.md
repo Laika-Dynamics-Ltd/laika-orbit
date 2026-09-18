@@ -26,4 +26,4 @@ Build and test only: `typescript` and `playwright` (Apache-2.0), `vitest` (MIT),
 ## Research credits
 
 `research/notes/findings.md` summarises public videos by Jay E / RoboNuggets on the "Rubric"
-second brain, which 1brain's design started from and departs from in four places.
+second brain, which Laika Orbit's design started from and departs from in four places.

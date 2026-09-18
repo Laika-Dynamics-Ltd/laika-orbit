@@ -78,7 +78,7 @@ async function main() {
     case 'ask': {
       const q = rest.join(' ')
       if (!q) {
-        console.error('usage: 1brain recall "<question>"')
+        console.error('usage: laikaorbit recall "<question>"')
         process.exitCode = 2
         return
       }
@@ -129,14 +129,14 @@ async function main() {
       break
     }
     default:
-      console.log(`1brain — deterministic, zero-token recall over a markdown knowledge base
+      console.log(`laikaorbit — deterministic, zero-token recall over a markdown knowledge base
 
-  1brain index              build the index and report size
-  1brain status             index health
-  1brain lint               router-file diagnostics + dangling pointers
-  1brain recall "<q>"       inspect retrieval (candidates, margin, evidence, cost)
-  1brain ask "<q>"          emit the packed prompt only
-  1brain mcp                serve recall, get and status to Claude Code over stdio
+  laikaorbit index              build the index and report size
+  laikaorbit status             index health
+  laikaorbit lint               router-file diagnostics + dangling pointers
+  laikaorbit recall "<q>"       inspect retrieval (candidates, margin, evidence, cost)
+  laikaorbit ask "<q>"          emit the packed prompt only
+  laikaorbit mcp                serve recall, get and status to Claude Code over stdio
 
   --root <dir>              the corpus to work on, for any command above
 
