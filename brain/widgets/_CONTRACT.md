@@ -91,7 +91,8 @@ Prefer `at`: it is exact across midnight and daylight-saving changes.
 
 Each widget header has a gear. What a person sets there is saved to
 `brain/widgets/_settings.json`, keyed by widget id, and merged over the widget file when it
-is served. Producers never write that file, so a refresh keeps the person's choices.
+is served. Producers never write that file, so a refresh keeps the person's choices. It is
+runtime state and git-ignored; a checkout without one starts from `_settings.template.json`.
 
 ```jsonc
 {

@@ -607,8 +607,15 @@ async function readWidgets() {
 const SETTINGS_FILE = resolve(WIDGET_DIR, '_settings.json')
 const SETTING_KEYS = new Set(['title', 'rail', 'order', 'href', 'collapsed', 'hidden', 'maxItems', 'height', 'config'])
 
+/**
+ * Widget layout is runtime state the app rewrites on every drag, so it is git-ignored: a checkout
+ * that has none yet starts from the committed _settings.template.json.
+ */
 async function readWidgetSettings() {
-  try { return JSON.parse(await fsRead(SETTINGS_FILE, 'utf8')) } catch { return {} }
+  for (const f of [SETTINGS_FILE, resolve(WIDGET_DIR, '_settings.template.json')]) {
+    try { return JSON.parse(await fsRead(f, 'utf8')) } catch {}
+  }
+  return {}
 }
 
 /** Merge a patch of { id: partial | null } into _settings.json; null resets a widget. */

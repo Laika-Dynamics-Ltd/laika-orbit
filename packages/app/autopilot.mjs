@@ -70,6 +70,7 @@ export const ACTIONS = {
   mode: { verb: 'autopilot', why: 'choose a mode on the control instead' },
   halt: { verb: 'kill switch', can: 'resume', label: 'Release it' },
   allow: { verb: 'always-allowed', can: 'unallow', label: 'Stop allowing it' },
+  ready: { verb: 'marked ready', why: 'the merge train takes it from here; a red check goes back to the chat' },
   queue: { verb: 'queued work for', why: 'change it on the queue instead: fleet_queue_update, or the queue page' },
 }
 

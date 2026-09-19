@@ -39,6 +39,9 @@ brain/widgets/email.json
 brain/widgets/calendar.json
 # the summary card (chat titles, what they did), written by the agent host's summary routine
 brain/widgets/summary.json
+# widget layout: the app rewrites it on every drag; a fresh checkout starts from _settings.template.json
+brain/widgets/_settings.json
+# the extraction cache's name before the rename; a checkout of an older branch may still write it
 
 # any env file except the example
 .env

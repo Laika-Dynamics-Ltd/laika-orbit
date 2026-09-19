@@ -947,6 +947,13 @@ body.rail-resizing main{transition:none}
 .wc-app em{font-style:normal;font-size:9px;color:var(--dim2);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* ---------- settings (⌘,) ---------- */
+.upd{flex:none;display:inline-flex;align-items:center;gap:7px;height:26px;padding:0 4px 0 10px;margin:0 6px 0 2px;border-radius:999px;
+  font:500 12px/1 system-ui,-apple-system,sans-serif;color:var(--n29);background:var(--n6);border:1px solid var(--n16);cursor:pointer}
+.upd[hidden]{display:none}
+.upd i{width:6px;height:6px;border-radius:50%;background:var(--cyan,var(--info))}
+.upd b{font-weight:600;color:var(--cyan,var(--info));padding:4px 9px;border-radius:999px;background:color-mix(in srgb,var(--cyan,var(--info)) 14%,transparent)}
+.upd:hover b{background:color-mix(in srgb,var(--cyan,var(--info)) 24%,transparent)}
+.upd:disabled{cursor:default;opacity:.7}
 .hdr-gear{flex:none;display:grid;place-items:center;width:30px;height:30px;padding:0;margin-left:10px;border-radius:8px;
   background:transparent;border:1px solid var(--n14);color:var(--n27);cursor:pointer;transition:color .14s,border-color .14s,background .14s}
 .hdr-gear:hover{color:var(--tx);border-color:var(--n19);background:var(--n7)}

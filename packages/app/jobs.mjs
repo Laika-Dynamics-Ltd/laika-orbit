@@ -163,7 +163,8 @@ export function createJobs({
       const p = insideRoot(cwd, d)
       if (p) mkdirSync(p, { recursive: true })
     }
-    const env = { ...process.env }
+    // not the host's corpus (BRAIN_ROOT): a job runs in its own folder
+    const { BRAIN_ROOT: _b, LAIKA_BRAIN_ROOT: _l, ...env } = process.env
     for (const [k, v] of Object.entries(o.env ?? {})) if (/^[A-Z_][A-Z0-9_]*$/i.test(k)) env[k] = String(v)
     prune()
     const j = {

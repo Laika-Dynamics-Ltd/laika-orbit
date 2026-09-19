@@ -7,7 +7,7 @@ import { createAway } from '../away.mjs'
 import { fleetTools, ROLE, settleCheckpointClose } from '../conductor.mjs'
 import { closeRefusal, createTaskTracker, etaText, groupLabel, worktreeDirty, expandFleetCommand, FLEET_COMMANDS, inferGroup, progressOf, recordDuration, spawnRefusal, taskKey } from '../fleet-work.mjs'
 import { setAwayBudget, watchFleet } from '../conductor.mjs'
-import { createParked, parkedRow, STALE_MS, staleHint } from '../fleet-work.mjs'
+import { createParked, MAX_SPAWNED, parkedRow, spawnHold, spawnSlots, STALE_MS, staleHint } from '../fleet-work.mjs'
 
 const MIN = 60_000
 
@@ -181,16 +181,29 @@ describe('live-progress boards', () => {
 })
 
 describe('spawn limit', () => {
-  it('refuses a fourth open conductor-spawned chat; closed ones and ordinary chats do not count', () => {
+  it('refuses a ninth open conductor-spawned chat; closed ones and ordinary chats do not count', () => {
     const m = new Map()
     const add = (id, o) => m.set(id, { id, repo: 'r', state: 'idle', spawnedBy: null, ...o })
-    add('a', { spawnedBy: 'lead' })
-    add('b', { spawnedBy: 'lead' })
-    add('c', { spawnedBy: 'lead', state: 'closed' })
-    add('d', {})
+    for (const id of 'abcdefg') add(id, { spawnedBy: 'lead' })
+    add('x', { spawnedBy: 'lead', state: 'closed' })
+    add('y', {})
     expect(spawnRefusal(m)).toBeNull()
-    add('e', { spawnedBy: 'lead2' })
-    expect(spawnRefusal(m)).toMatch(/^3 conductor-spawned chats are already open \(the limit is 3\)/)
+    add('h', { spawnedBy: 'lead2' })
+    expect(spawnRefusal(m)).toMatch(/^8 conductor-spawned chats are already open \(the limit is 8\)/)
+  })
+
+  it('holds new chats under the cap while this Mac or box1 is loaded or the away budget is low, and says why', () => {
+    const m = new Map([['a', { id: 'a', repo: 'r', state: 'idle', spawnedBy: 'lead' }]])
+    const now = Date.now()
+    const box1 = (load) => ({ at: now, routes: { cpuAll: ['box1'] }, machines: [{ name: 'box1', online: true, load, cores: 8 }] })
+    const hold = (o) => () => spawnHold({ load: null, machines: null, now, ...o })
+    expect(spawnRefusal(m, { hold: hold({ machines: box1(2) }) })).toBeNull()
+    expect(spawnRefusal(m, { hold: hold({ load: { busy: true, at: now, notice: 'Mac busy: Unity is heavy' } }) })).toMatch(/^Holding new chats for now: Mac busy: Unity is heavy/)
+    expect(spawnRefusal(m, { hold: hold({ machines: box1(7.5) }) })).toMatch(/box1 is loaded \(load 7\.5 on 8 cores\)/)
+    expect(spawnRefusal(m, { hold: hold({ budgetLow: () => 'the away budget is low ($0.80 of $10 left)' }) })).toMatch(/away budget is low/)
+    // a stale reading is unknown, never busy
+    expect(spawnRefusal(m, { hold: hold({ load: { busy: true, at: now - 3_600_000 } }) })).toBeNull()
+    expect(spawnSlots(m, { hold: hold({ machines: box1(8) }) })).toMatchObject({ free: 0, held: expect.stringMatching(/box1/) })
   })
 })
 
@@ -228,7 +241,7 @@ describe('fleet_close', () => {
   afterEach(() => away.close())
 
   it('closes an idle, clean chat it opened, logs it, and frees a spawn slot', async () => {
-    for (const id of ['sp1aaaaa', 'sp2bbbbb', 'sp3ccccc']) chat(id)
+    for (let i = 1; i <= MAX_SPAWNED; i++) chat(`sp${i}${'abcdefgh'[i - 1].repeat(5)}`)
     expect(spawnRefusal(sessions)).toMatch(/already open/)
     const r = await call('fleet_close', { chat: 'sp1', reason: 'brief done, committed' })
     expect(r).toEqual({ error: false, text: 'Closed sp1aaaaa (web). A spawn slot is free.' })
@@ -399,7 +412,7 @@ describe('fleet_checkpoint_close and spawn slots', () => {
 
   it('shows the spawn slots in fleet_list, with chats closing after a checkpoint', async () => {
     let r = JSON.parse((await call('fleet_list', {})).text)
-    expect(r.spawnSlots).toEqual({ used: 1, max: 3, free: 2, open: ['kid00000 (web)'] })
+    expect(r.spawnSlots).toEqual({ used: 1, max: MAX_SPAWNED, free: MAX_SPAWNED - 1, open: ['kid00000 (web)'] })
     await call('fleet_checkpoint_close', { chat: 'kid' })
     r = JSON.parse((await call('fleet_list', {})).text)
     expect(r.spawnSlots.open).toEqual(['kid00000 (web) closing after its checkpoint'])
@@ -526,11 +539,9 @@ describe('fleet_park and fleet_unpark', () => {
     chat('sp1aaaaa')
     await call('fleet_park', { chat: 'sp1' })
     await away.start({ minutes: 60 })
-    chat('sp2bbbbb')
-    chat('sp3ccccc')
-    chat('sp4ddddd')
+    for (let i = 2; i <= MAX_SPAWNED + 1; i++) chat(`sp${i}${'abcdefghi'[i - 1].repeat(5)}`)
     expect((await call('fleet_unpark', { chat: 'sp1' })).text).toMatch(/already open/)
-    sessions.delete('sp4ddddd')
+    sessions.delete(`sp${MAX_SPAWNED + 1}iiiii`)
     expect(await call('fleet_unpark', { chat: 'sp1', text: 'carry on' })).toEqual({ error: false, text: 'Resumed sp1aaaaa (web) and sent it your message.' })
     expect(unpark).toHaveBeenLastCalledWith(lead, 'sp1', { text: 'carry on' })
     expect(store.list()).toEqual([])
@@ -583,7 +594,7 @@ describe('stale chats', () => {
       add('mine0000', { spawnedBy: lead.id })
       add('dirt0000', { spawnedBy: null })
       add('new00000', { spawnedBy: null, updatedAt: at - H })
-      dirty = vi.fn(async (cwd) => cwd === '/dirt0000')
+      dirty = vi.fn(async (x) => x.cwd === '/dirt0000')
     })
     afterEach(() => vi.useRealTimers())
 
@@ -595,7 +606,7 @@ describe('stale chats', () => {
       expect(by.mine0000).toMatchObject({ stale: 'idle 26h, clean: probably done', closable: true })
       expect(by.dirt0000.stale).toBeUndefined()
       expect(by.new00000.stale).toBeUndefined()
-      expect(dirty).not.toHaveBeenCalledWith('/new00000')
+      expect(dirty).not.toHaveBeenCalledWith(expect.objectContaining({ cwd: '/new00000' }))
     })
 
     it('tells conductors on autopilot at most hourly, and once a day per chat', async () => {

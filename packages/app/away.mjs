@@ -239,6 +239,19 @@ export function createAway({ sessions, fleet, file, deps = {}, policy = () => lo
     }
     return null
   }
+  /**
+   * Whether the away budget is nearly spent, so new chats should wait (fleet-work.mjs spawnHold):
+   * why, or null. Low is under BUDGET_LOW of its dollars, or its last spawn.
+   */
+  function budgetLow(share = 0.15) {
+    const b = state.budget
+    if (!state.on || !b) return null
+    const dollars = spent()
+    if (b.dollars != null && dollars < b.dollars && b.dollars - dollars < b.dollars * share)
+      return `the away budget is low ($${(b.dollars - dollars).toFixed(2)} of $${b.dollars} left)`
+    if (b.spawns != null && b.spawns - spawnsUsed() === 1 && b.spawns > 1) return `the away budget has one chat left to open (of ${b.spawns})`
+    return null
+  }
   /** a budget limit reached for the first time: said once, to the conductor and in the summary */
   const reached = (key, what) => {
     const hit = state.budgetHit ?? {}
@@ -568,6 +581,7 @@ export function createAway({ sessions, fleet, file, deps = {}, policy = () => lo
     parked,
     unparked,
     budgetRefusal,
+    budgetLow,
     /** for tests: what recovery holds for a chat */
     recoveryOf: (id) => rec.get(id) ?? null,
     close: () => {

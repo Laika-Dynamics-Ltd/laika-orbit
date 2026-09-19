@@ -458,7 +458,7 @@ const STATE_STALE_MS = 2 * 60_000
 export function saveMachineState(rows, file = STATE_FILE) {
   try {
     mkdirSync(dirname(file), { recursive: true })
-    const slim = rows.map((r) => ({ name: r.name, os: r.os ?? r.caps?.os ?? null, online: !!r.online, caps: r.caps ?? null, jobs: r.jobs ?? 0 }))
+    const slim = rows.map((r) => ({ name: r.name, os: r.os ?? r.caps?.os ?? null, online: !!r.online, caps: r.caps ?? null, jobs: r.jobs ?? 0, load: r.load ?? null, cores: r.cores ?? null }))
     writeFileSync(`${file}.tmp`, JSON.stringify({ at: Date.now(), machines: slim, routes: routesOf(slim) }))
     renameSync(`${file}.tmp`, file)
   } catch {}

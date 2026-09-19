@@ -1,0 +1,68 @@
+/*
+ * The work ledger (work-ledger.ts): a chat's work as git sees it, as a row of small chips.
+ * Shared by the bar at the top of each chat and the cockpit's nodes. Ramp and tone tokens only.
+ */
+.wl-bar,
+.ck-work {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  font: 500 11px/1.35 system-ui, -apple-system, sans-serif;
+  font-variant-numeric: tabular-nums;
+  color: var(--n29);
+  min-width: 0;
+}
+.wl-bar {
+  padding: 5px 14px;
+  border-bottom: 1px solid var(--n12, var(--n16));
+  background: color-mix(in srgb, var(--n4, var(--n2)) 70%, transparent);
+  flex: none;
+}
+.wl-bar[hidden] { display: none }
+.ck-work { margin-top: 5px }
+.wl-fill { flex: 1 }
+
+.wl-st {
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--n35);
+  background: color-mix(in srgb, currentColor 14%, transparent);
+  white-space: nowrap;
+}
+.wl-st.s-merged { color: var(--ok, var(--n29)) }
+.wl-st.s-ready { color: var(--cyan, var(--info)) }
+.wl-st.s-checking { color: var(--info) }
+.wl-st.s-failed,
+.wl-st.s-conflict { color: var(--err) }
+.wl-st.s-not-ready { color: var(--n29) }
+
+.wl-br,
+.wl-ah,
+.wl-bh,
+.wl-dt,
+.wl-ov,
+.wl-lc { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; min-width: 0 }
+.wl-br { color: var(--n33, var(--n35)); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; max-width: 28ch }
+.wl-br em,
+.wl-dt em { font-style: normal; color: var(--n24); font-family: system-ui, -apple-system, sans-serif }
+.wl-ah { color: var(--n35) }
+.wl-bh.far { color: var(--warn) }
+.wl-dt { color: var(--warn) }
+.wl-dt i { width: 6px; height: 6px; border-radius: 50%; background: var(--warn) }
+.wl-ov { color: var(--warn); font-weight: 600 }
+.wl-lc { color: var(--n24) }
+.ck-work .wl-lc { margin-left: auto }
+.wl-ready {
+  font: 600 11px/1 system-ui, -apple-system, sans-serif;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--cyan, var(--info)) 55%, transparent);
+  background: color-mix(in srgb, var(--cyan, var(--info)) 14%, transparent);
+  color: var(--cyan, var(--info));
+  cursor: pointer;
+}
+.wl-ready:hover { background: color-mix(in srgb, var(--cyan, var(--info)) 24%, transparent) }
+.wl-ready:disabled { opacity: 0.6; cursor: default }

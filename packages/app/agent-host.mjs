@@ -39,11 +39,15 @@ import { allowBashPattern, DEFAULT_POLICY, explainRefusal, listPolicyAdditions, 
 import { gpus, sysres } from './feeds/sysres.mjs'
 import { available as secretsAvailable, secretsServer } from './secrets.mjs'
 import { createJobs, memAvailable, prepareJobSlice, unityVersions, WORK_ROOT } from './jobs.mjs'
-import { boardTasks, createParked, createTaskTracker, expandFleetCommand, FLEET_COMMANDS, groupLabel, inferGroup, parkedRow, spawnRefusal } from './fleet-work.mjs'
+import { boardTasks, createParked, createTaskTracker, expandFleetCommand, FLEET_COMMANDS, groupLabel, inferGroup, parkedRow, BUDGET_LOW, spawnHold, spawnRefusal } from './fleet-work.mjs'
 import { createSummaries } from './summary.mjs'
 import { createQueue } from './queue.mjs'
 import { createQueueHost } from './queue-host.mjs'
 import { createFleetStream } from './fleet-stream.mjs'
+import { createLedger } from './work-ledger.mjs'
+import { createStableRebuild, isStableHost } from './stable-rebuild.mjs'
+import { macBusy } from './feeds/loadwatch.mjs'
+import { createTrain, createTrainStore, FROM_TRAIN, readyRefusal, WORK_PROMPT } from './merge-train.mjs'
 
 const APP_PORT = process.env.APP_PORT ?? '5200'
 const STATE = join(tmpdir(), `laika-agent-host-${APP_PORT}.json`)
@@ -57,8 +61,47 @@ const BUILD = statSync(new URL(import.meta.url)).mtimeMs
 
 /** @type {Map<string, Session>} */
 const sessions = new Map()
+/** each chat's work as git sees it: worktree, branch, ahead/behind, uncommitted files (work-ledger.mjs) */
+const trainStore = createTrainStore()
+const ledger = createLedger({
+  sessions,
+  onChange: (x) => {
+    fleetStream.touch(x, { t: 'ledger' })
+    // a new commit may carry "Ready: yes"
+    train.kick()
+  },
+  marks: trainStore.marks,
+  trainOf: (worktree) => trainStore.records.get(worktree),
+  // two chats' unmerged work touches the same file: both hear it now, not at merge time
+  onOverlap: (x, y, files) => {
+    const list = files.slice(0, 12).join(', ') + (files.length > 12 ? ` and ${files.length - 12} more` : '')
+    const name = (c) => `${c.id.slice(0, 8)} (${c.title || c.repo})`
+    for (const [me, other] of [[x, y], [y, x]])
+      tellChat(me, `Heads up: chat ${name(other)} is also changing ${list} in ${me.repo}. Whichever slice lands second has to resolve any conflict, so keep your changes there small and commit them soon; say so if you need the other chat to hold off.`)
+    fleetStream.broadcast('train', { at: Date.now(), repo: x.repo, phase: 'overlap', batch: [], chats: [x.id, y.id], files })
+  },
+})
+/** a message from the merge train to a chat: a note in a demo chat, a turn in a real one */
+const tellChat = (x, text) => (x.account?.demo ? x.emit({ t: 'note', text: `${FROM_TRAIN}${text}` }) : x.send(`${FROM_TRAIN}${text}`, [], { auto: true }))
+/**
+ * Mark a chat's slice ready at its current tip (docs/MERGE-TRAIN-CONTRACT.md): the same as a
+ * "Ready: yes" trailer. `worktree` pins where the chat works when the host could not tell.
+ */
+async function markReady(x, { worktree = null, by = 'you' } = {}) {
+  if (worktree) x.workPin = resolve(worktree)
+  const l = await ledger.facts(x, { fresh: true })
+  const why = readyRefusal(l)
+  if (why) throw new Error(why)
+  trainStore.marks.set(l.worktree, { sha: l.head, at: Date.now(), chat: x.id, by })
+  // marked again after a red check or a conflict: the train tries it afresh
+  trainStore.records.clear(l.worktree)
+  train.kick()
+  x.emit({ t: 'note', text: `Marked ready at ${l.head.slice(0, 7)} (${l.branch ?? 'detached'}): the merge train takes it from here` })
+  await ledger.facts(x, { fresh: true })
+  return ledger.get(x)
+}
 /** conductor chats wake when the chats they lead change (conductor.mjs) */
-const fleet = watchFleet(sessions)
+const fleet = watchFleet(sessions, { dirty: ledger.dirty })
 /**
  * "I'm away": the conductor on autopilot, safe permissions approved without you, stuck chats
  * recovered (away.mjs). Kept beside the open-chat registry, so it survives a restart.
@@ -127,7 +170,31 @@ const queueHost = createQueueHost({
   },
 })
 /** every open chat as a row, pushed as it changes (fleet-stream.mjs): the cockpit's feed */
-const fleetStream = createFleetStream({ sessions, queue })
+const fleetStream = createFleetStream({ sessions, queue, ledger })
+/**
+ * The merge train (merge-train.mjs): ready slices onto an integration branch, the repo's light
+ * check, then a fast-forward of local main. Never a push. What it has to say about a slice goes to
+ * that slice's chat.
+ */
+const train = createTrain({
+  sessions,
+  ledger,
+  store: trainStore,
+  tell: tellChat,
+  emit: (frame) => fleetStream.broadcast('train', frame),
+  onLanded: () => rebuild?.kick(),
+})
+/**
+ * The stable app only: when local main moves, its next version is built beside it and the page
+ * offers a restart (stable-rebuild.mjs). It never restarts on its own.
+ */
+const rebuild = isStableHost()
+  ? createStableRebuild({
+      source: resolve(process.env.BRAIN_ROOT),
+      emit: (frame) => fleetStream.broadcast('rebuild', frame),
+      busy: () => (macBusy() ? 'this Mac is busy: the build waits until it is not' : null),
+    })
+  : null
 
 // ----------------------------------------------------------------- sessions ----
 class Session {
@@ -219,6 +286,8 @@ class Session {
     this.updatedAt = e.at
     for (const fn of this.listeners) fn(e)
     fleetStream.touch(this, e)
+    // an edit or a command may change its files or commit: the ledger (and the overlap check) re-reads
+    if (e.t === 'tool' && !e.sub && /^(Edit|Write|MultiEdit|NotebookEdit|Bash)$/.test(e.name ?? '')) ledger.poke(this)
     return e
   }
 
@@ -228,10 +297,12 @@ class Session {
     this.emit({ t: 'status', state })
     fleet.onState(this)
     queueHost.onState(this)
+    // a turn ended: its commits (and any "Ready: yes") are in git now
+    if (state === 'idle') ledger.poke(this)
     // asked by a conductor to checkpoint and close: close it once that turn is over, if it may be
     // (not while chats are coming back: its conductor may not be back yet)
     if (this.closeAfter && !restoring)
-      settleCheckpointClose(this, sessions, { close: closeFromConductor, tell: fleet.tell }).catch((e) => console.log(`checkpoint close: ${e?.message ?? e}`))
+      settleCheckpointClose(this, sessions, { dirty: ledger.dirty, close: closeFromConductor, tell: fleet.tell }).catch((e) => console.log(`checkpoint close: ${e?.message ?? e}`))
     saveRegistry()
   }
 
@@ -557,7 +628,7 @@ async function restoreSessions() {
 }
 /** a restored checkpoint-close: close it now if its checkpoint ran, or tell its conductor why not */
 function settleRestoredClose(x) {
-  settleCheckpointClose(x, sessions, { close: closeFromConductor, tell: fleet.tell }).catch((e) => console.log(`checkpoint close: ${e?.message ?? e}`))
+  settleCheckpointClose(x, sessions, { dirty: ledger.dirty, close: closeFromConductor, tell: fleet.tell }).catch((e) => console.log(`checkpoint close: ${e?.message ?? e}`))
 }
 /** bring back parked chats whose other copy has closed (called from tidy, in the current host) */
 async function resumeDeferred(procs) {
@@ -679,8 +750,18 @@ function hostIsCurrent(pid) {
 
 // ---------------------------------------------------------------- real runs ----
 const sameDir = (a, b) => resolve(a).replace(/\/+$/, '') === resolve(b).replace(/\/+$/, '')
+/**
+ * What a chat, a terminal or a job gets from the host's environment: everything but the host's
+ * own corpus. BRAIN_ROOT points the host at the main checkout; inherited, it pointed every test
+ * server a chat started from its worktree at the main checkout too, so those servers rewrote its
+ * runtime files and an older checkout's copy wrote a stale cache there under the old folder name.
+ */
+const childEnv = (env = process.env) => {
+  const { BRAIN_ROOT, LAIKA_BRAIN_ROOT, ...rest } = env
+  return rest
+}
 const withoutConfigDir = (env) => {
-  const { CLAUDE_CONFIG_DIR, ...rest } = env
+  const { CLAUDE_CONFIG_DIR, ...rest } = childEnv(env)
   return rest
 }
 
@@ -688,7 +769,7 @@ async function chatServers(s) {
   const mcpServers = {}
   const allowedTools = []
   if (s.role === ROLE) {
-    mcpServers.fleet = await fleetServer(s, sessions, { spawn: spawnFromConductor, close: closeFromConductor, renamed: renamedByConductor, park: parkFromConductor, unpark: unparkChat, parked: () => parked.list(), queue })
+    mcpServers.fleet = await fleetServer(s, sessions, { spawn: spawnFromConductor, close: closeFromConductor, renamed: renamedByConductor, park: parkFromConductor, unpark: unparkChat, parked: () => parked.list(), queue, dirty: ledger.dirty, ledger: ledger.get, ready: (x) => markReady(x, { by: 'conductor' }), hold: holdSpawns })
     allowedTools.push('mcp__fleet')
   }
   if (secretsAvailable()) {
@@ -713,14 +794,14 @@ async function runReal(s) {
       effort: s.effort ?? undefined,
       includePartialMessages: true,
       abortController: s.abort,
-      systemPrompt: { type: 'preset', preset: 'claude_code', ...(s.role === ROLE ? { append: CONDUCTOR_PROMPT } : {}) },
+      systemPrompt: { type: 'preset', preset: 'claude_code', append: s.role === ROLE ? `${CONDUCTOR_PROMPT}\n\n${WORK_PROMPT}` : WORK_PROMPT },
       // secrets come from the Keychain through a password field, never through the chat (secrets.mjs)
       ...(await chatServers(s)),
       // the default login (~/.claude) must run without CLAUDE_CONFIG_DIR: setting it makes
       // Claude Code look for its settings file inside the folder and treat it as a fresh install
       env: sameDir(s.account.configDir, join(homedir(), '.claude'))
         ? withoutConfigDir(process.env)
-        : { ...process.env, CLAUDE_CONFIG_DIR: s.account.configDir },
+        : { ...childEnv(), CLAUDE_CONFIG_DIR: s.account.configDir },
       canUseTool: async (toolName, input, opts) => {
         if (toolName === 'AskUserQuestion') {
           const r = await s.ask('question', { toolUseId: opts.toolUseID, questions: input.questions ?? [] })
@@ -851,13 +932,16 @@ async function startAwayConductor({ goal, cwd }) {
   return s
 }
 
+/** why new conductor chats should wait even under the cap: the Mac's or box1's load, a low away budget */
+const holdSpawns = () => spawnHold({ budgetLow: () => away.budgetLow(BUDGET_LOW) })
+
 /**
  * A conductor's fleet_spawn: a new chat in `cwd` with a first prompt, marked as the conductor's.
  * It is an ordinary chat from then on: the same permission prompts, the same away policy, shown in
  * the fleet and on the page like any other. Every spawn goes in the away log and summary.
  */
 async function spawnFromConductor(c, { cwd, prompt, account: wanted, title }) {
-  const refused = spawnRefusal(sessions)
+  const refused = spawnRefusal(sessions, { hold: holdSpawns })
   if (refused) throw new Error(refused)
   const dir = resolve(String(cwd ?? '').replace(/^~(?=\/|$)/, homedir()))
   if (!dir.startsWith(`${homedir()}/`) || !existsSync(dir) || !statSync(dir).isDirectory()) throw new Error(`No folder at ${cwd}`)
@@ -944,7 +1028,7 @@ async function unparkChat(c, key, { text } = {}) {
     return open
   }
   if (c && r.spawnedBy) {
-    const refused = spawnRefusal(sessions)
+    const refused = spawnRefusal(sessions, { hold: holdSpawns })
     if (refused) throw new Error(refused)
   }
   const other = elsewhere(r.sdkSessionId)
@@ -1257,7 +1341,7 @@ const claudeBin = () => {
   }
 }
 const envFor = (configDir) =>
-  sameDir(configDir, DEFAULT_DIR) ? withoutConfigDir(process.env) : { ...process.env, CLAUDE_CONFIG_DIR: configDir }
+  sameDir(configDir, DEFAULT_DIR) ? withoutConfigDir(process.env) : { ...childEnv(), CLAUDE_CONFIG_DIR: configDir }
 
 const authCache = new Map()
 function checkAuth(configDir) {
@@ -1351,7 +1435,7 @@ class Term {
       cols: o.cols ?? 100,
       rows: o.rows ?? 24,
       cwd: o.cwd,
-      env: { ...(o.env ?? process.env), TERM: 'xterm-256color', COLORTERM: 'truecolor', TERM_PROGRAM: 'laika-orbit' },
+      env: { ...(o.env ?? childEnv()), TERM: 'xterm-256color', COLORTERM: 'truecolor', TERM_PROGRAM: 'laika-orbit' },
     })
     this.proc.onData((d) => {
       this.buf += d
@@ -1701,6 +1785,27 @@ const server = createServer(async (req, res) => {
     // the fleet board: a line per chat and every decision waiting on you (fleet-board.mjs)
     if (url.pathname === '/fleet' && req.method === 'GET') return json(200, fleetBoard(sessions.values()))
     if (url.pathname === '/fleet/events' && req.method === 'GET') return fleetStream.serve(req, res)
+    // the stable app's next version: GET its state; POST /stable/restart restarts into it (you asked)
+    if (url.pathname === '/stable' && req.method === 'GET') return json(200, rebuild?.view() ?? { state: 'off' })
+    if (url.pathname === '/stable/restart' && req.method === 'POST') {
+      if (!rebuild) return json(409, { error: 'Only the stable app restarts into a new version' })
+      try {
+        return json(200, rebuild.restart())
+      } catch (e) {
+        return json(409, { error: String(e?.message ?? e) })
+      }
+    }
+    // the ready marker: POST { chat, worktree? } marks that chat's slice ready at its tip
+    if (url.pathname === '/train/ready' && req.method === 'POST') {
+      const b = await readBody(req)
+      const x = sessions.get(String(b.chat ?? ''))
+      if (!x || x.state === 'closed') return json(404, { error: 'no such chat' })
+      try {
+        return json(200, { ledger: await markReady(x, { worktree: typeof b.worktree === 'string' && b.worktree ? b.worktree : null }) })
+      } catch (e) {
+        return json(409, { error: String(e?.message ?? e) })
+      }
+    }
     if (url.pathname === '/sessions' && req.method === 'POST') {
       const b = await readBody(req)
       const account = accounts().find((a) => a.id === b.account)

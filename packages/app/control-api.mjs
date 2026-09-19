@@ -1766,7 +1766,7 @@ async function handleNodes(parts, req, json) {
       }),
     )
     // what goes where now, for the card and for the load watcher and chats (~/.laika/machines.json)
-    const remote = rows.filter((r) => !r.local).map((r) => ({ name: r.id, os: r.os, online: r.online, caps: r.caps, jobs: r.machine?.jobs ?? 0 }))
+    const remote = rows.filter((r) => !r.local).map((r) => ({ name: r.id, os: r.os, online: r.online, caps: r.caps, jobs: r.machine?.jobs ?? 0, load: r.machine?.load ?? null, cores: r.machine?.cores ?? null }))
     saveMachineState(remote)
     const routes = routesOf(remote)
     for (const r of rows) r.gets = r.local ? [] : [routes.gpu === r.id && 'GPU work', routes.cpuAll.includes(r.id) && 'CPU work'].filter(Boolean)

@@ -1,26 +1,59 @@
 # Laika Orbit
 
-**Your whole working day in one window: a live map of everything you know, Claude Code chats
-side by side, a real browser, and your inbox and calendar, all running on your own machine.**
+**A cockpit for your coding agents.** Run many Claude Code chats at once. Orbit keeps them moving,
+puts what needs you first, and sits beside the editor you already use. Open source, and it all runs
+on your own Mac.
 
-Laika Orbit is powered by **Laika Orbit recall**, a retrieval engine that answers questions about your
-files without calling a model. Ask a question and you get back the exact section that answers
-it and the file it came from, in about a millisecond, with 97.8% fewer tokens than an agent
-grepping and reading whole files ([`bench/RESULTS.md`](bench/RESULTS.md)).
+![Away mode: the Autopilot panel set to Away while the conductor keeps the chats moving](docs/images/away.webp)
 
-> **Status: macOS preview.** Built and used daily on macOS. The engine, CLI and MCP server run
+> **Status: macOS preview.** Built and used daily on macOS, and built with itself
+> ([how](https://laikaorbit.com/built-with-orbit/)). The recall engine, CLI and MCP server run
 > anywhere Node runs; the desktop app is macOS first, Linux best effort, Windows untested.
 
-## What's in it
+## What it does
 
-| | |
-|---|---|
-| **The map** | Every indexed file, repo, chat and routine as a 3D ring you can fly through. `/` searches, `i` opens the index settings, `?` lists every key. |
-| **Claude panel** | Claude Code chats in VS Code-style groups: split, drag, or four in a grid. Chats for a single repo or a whole project folder, a task track beside each chat, sub-agent cards, several Claude accounts at once, and chats that come back by themselves after a crash or restart. |
-| **Browser** | `b` opens real Chromium tabs, one storage profile per account, so work and client logins sit side by side. Chrome-style tabs, and Chrome extensions from the Web Store (desktop app only). |
-| **Widgets** | Inbox (Gmail), calendar (any iCal feed), agents, routines and skills on the side rails. Each is a JSON file in `brain/widgets/` you can edit or add to. |
-| **Adoption pulse** | `/pulse`: everyone arriving at the project as a 3D node network — public repo numbers, and opted-in anonymous usage. The window and its rail button appear only on the maintainer's machine; reporting is off until a user turns it on. See [PRIVACY.md](PRIVACY.md). |
-| **Laika Orbit recall** | The engine underneath: an inverted index over your folders, seven pure steps, no model call. Also a CLI and an MCP server, so Claude Code calls `recall` instead of grepping. |
+**Give it a goal. It runs the fleet.** A conductor chat sends each of your chats its next step.
+Switch to Away and it keeps them going: plainly safe steps are approved, stuck chats are brought
+back, and anything that reaches outside your Mac waits for you. Come back to one summary card.
+[Away mode](https://laikaorbit.com/docs/away-mode/).
+
+**Every chat, and what each one needs.** Chats run side by side, one per task, on any of your
+Claude accounts, and come back after a restart or a crash. The fleet board puts the ones waiting on
+you at the top.
+
+![The fleet board: chats waiting on you first, finished ones below](docs/images/fleet.webp)
+
+**Long jobs report themselves.** Builds, test runs and batch jobs share one runs page, with progress,
+an ETA, and before/after compares. A job that goes quiet is flagged as stalled.
+
+**Work that waits its turn.** A queue of next tasks that survives restarts. With autopilot on, the
+next item starts by itself when a chat frees up.
+
+<p><img src="docs/images/runs.webp" width="49%" alt="The runs page"> <img src="docs/images/queue.webp" width="49%" alt="The queue"></p>
+
+**Heavy work goes to your other machines.** Tests, builds and captures run on a Linux box under the
+desk and the files come back ([below](#other-machines)). Windows PCs for GPU work are in testing.
+
+**And the rest of your day in the same window:** panels you dock and lay out, a real Chromium
+browser with a profile per account, inbox and calendar widgets, and a live map of everything you
+know. Hidden panels stop drawing: idle, the app went from 41% of one CPU core to 11%, and to 5.5%
+while you're in another window.
+
+**Finished work folds itself into main (new).** Each chat shows its branch, its commits and its
+uncommitted files. Mark a chat's work ready and the merge train lands it on your local main once the
+repo's own check passes. If the check goes red, it finds which chat's work broke it, lands the rest,
+and sends that chat the failing output. Pushing stays with you.
+
+### Laika Orbit recall
+
+Underneath is **Laika Orbit recall**, a retrieval engine that answers questions about your files
+without calling a model: the exact section and the file it came from, in about a millisecond, with
+97.8% fewer tokens than an agent grepping and reading whole files
+([`bench/RESULTS.md`](bench/RESULTS.md)). It works in any Claude Code session on its own:
+
+```bash
+claude mcp add laikaorbit -- npx -y laikaorbit mcp
+```
 
 ## Requirements
 

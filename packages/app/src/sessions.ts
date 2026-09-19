@@ -24,6 +24,7 @@ import { attachChatMentions, routeFromConductor } from './cockpit-route.ts'
 import { diffHtml } from './diff.ts'
 import { createFleetBoard } from './fleet-board.ts'
 import { type PanelHandle, type Region, registerPanel, registerRegions } from './panels.ts'
+import { mountLedgerBar } from './work-ledger.ts'
 
 /** the rail glyph for the fleet board: rows, each with its status dot */
 const FLEET_ICON =
@@ -722,6 +723,8 @@ type View = {
   root: HTMLElement
   /** a conductor's cockpit and @ list (cockpit.ts): let go when the chat ends */
   cockpit?: () => void
+  /** the bar of the chat's work as git sees it (work-ledger.ts) */
+  ledger?: ReturnType<typeof mountLedgerBar>
   log: HTMLElement
   tasks: HTMLElement
   composer: Composer
@@ -5124,6 +5127,8 @@ export function createSessions(opts: { popped?: boolean } = {}) {
     }
     if (s.work) setWork(v, s.work)
     paintWorking(v)
+    // the chat's work as git sees it: branch, ahead/behind main, uncommitted, merge state
+    if (s.role !== 'conductor') v.ledger = mountLedgerBar(r, s.id)
     if (s.role === 'conductor') {
       r.classList.add('conductor')
       const head = el('header', 'cd-head')
@@ -5371,6 +5376,7 @@ export function createSessions(opts: { popped?: boolean } = {}) {
     // a chat that is not on screen keeps its events and draws them when it comes back into view
     v.unwatch = presence.watch(v.root, (on) => {
       v.shown = on
+      v.ledger?.setShown(on)
       if (v.releaseTimer) clearTimeout(v.releaseTimer)
       v.releaseTimer = on ? null : setTimeout(() => release(v), RELEASE_AFTER_MS)
       if (!on) return tickWorking()
@@ -5541,6 +5547,7 @@ export function createSessions(opts: { popped?: boolean } = {}) {
     v.fit?.disconnect()
     v.unwatch?.()
     v.cockpit?.()
+    v.ledger?.dispose()
     for (const t of [v.awayTimer, v.replayTimer, v.trackTimer]) if (t) clearTimeout(t)
     trackLater.delete(v)
     disposeRunStrip(v.log)

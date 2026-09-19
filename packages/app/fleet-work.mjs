@@ -118,18 +118,56 @@ export function expandFleetCommand(text) {
 
 // -------------------------------------------------------------------- spawns ----
 /** at most this many conductor-spawned chats open at once, across every conductor */
-export const MAX_SPAWNED = 3
+export const MAX_SPAWNED = 8
+/** a machine counts as loaded at this much load per core */
+export const LOADED_PER_CORE = 0.85
+/** the away budget counts as low with less than this share of its dollars left */
+export const BUDGET_LOW = 0.15
 /** the spawn cap as it stands: the open conductor-spawned chats, and how many more may open */
-export function spawnSlots(sessions) {
+export function spawnSlots(sessions, { hold = () => null } = {}) {
   const open = [...sessions.values()].filter((x) => x.spawnedBy && x.state !== 'closed')
-  return { open, used: open.length, max: MAX_SPAWNED, free: Math.max(0, MAX_SPAWNED - open.length) }
+  const held = open.length < MAX_SPAWNED ? hold() : null
+  return { open, used: open.length, max: MAX_SPAWNED, free: held ? 0 : Math.max(0, MAX_SPAWNED - open.length), held }
 }
 
-/** why a conductor may not open another chat now (fleet_spawn, fleet_unpark), or null when it may */
-export function spawnRefusal(sessions) {
+/**
+ * Why a conductor may not open another chat now (fleet_spawn, fleet_unpark), or null when it may:
+ * the cap, then `hold()` (spawnHold: the machines' load, the away budget).
+ */
+export function spawnRefusal(sessions, { hold = () => null } = {}) {
   const { open } = spawnSlots(sessions)
-  if (open.length < MAX_SPAWNED) return null
-  return `${open.length} conductor-spawned chats are already open (the limit is ${MAX_SPAWNED}): ${open.map((x) => `${x.id.slice(0, 8)} (${x.repo})`).join(', ')}. Wait for one to finish and be closed, or send the work to an existing chat.`
+  if (open.length >= MAX_SPAWNED)
+    return `${open.length} conductor-spawned chats are already open (the limit is ${MAX_SPAWNED}): ${open.map((x) => `${x.id.slice(0, 8)} (${x.repo})`).join(', ')}. Wait for one to finish and be closed, or send the work to an existing chat.`
+  const why = hold()
+  return why ? `Holding new chats for now: ${why}. Send the work to an open chat, or wait and try again.` : null
+}
+
+const readJson = (f) => {
+  try {
+    return JSON.parse(readFileSync(f, 'utf8'))
+  } catch {
+    return null
+  }
+}
+/**
+ * Why new chats should wait even under the cap, or null: this Mac is busy (the load watcher's
+ * ~/.laika/load.json), every machine CPU work goes to is loaded (~/.laika/machines.json, box1),
+ * or the away budget is low (`budgetLow`, away.mjs). Files older than a few minutes count as
+ * unknown, never as busy.
+ */
+export function spawnHold({ load = readJson(join(homedir(), '.laika', 'load.json')), machines = readJson(join(homedir(), '.laika', 'machines.json')), budgetLow = () => null, now = Date.now() } = {}) {
+  const why = []
+  if (load?.busy && now - (load.at ?? 0) < 5 * 60_000) why.push(load.notice || `this Mac is busy (${(load.reasons ?? []).join(', ') || `CPU ${load.cpu}%`})`)
+  if (machines && now - (machines.at ?? 0) < 5 * 60_000) {
+    const names = machines.routes?.cpuAll ?? []
+    const cpu = (machines.machines ?? []).filter((m) => m.online && names.includes(m.name))
+    const loaded = cpu.filter((m) => m.load != null && m.cores > 0 && m.load / m.cores >= LOADED_PER_CORE)
+    if (cpu.length && loaded.length === cpu.length)
+      why.push(loaded.map((m) => `${m.name} is loaded (load ${Number(m.load).toFixed(1)} on ${m.cores} cores)`).join(', '))
+  }
+  const b = budgetLow()
+  if (b) why.push(b)
+  return why.length ? why.join('; ') : null
 }
 
 // -------------------------------------------------------------------- closes ----

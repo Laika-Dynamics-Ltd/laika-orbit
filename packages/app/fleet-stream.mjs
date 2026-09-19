@@ -6,6 +6,7 @@
  *     event: row        { at, row }    a chat changed (state, text, spend, a decision, its tree)
  *     event: gone       { at, id }     a chat closed or was removed
  *     event: queue      <queue frame>  every queue event, exactly as /queue/events sends it
+ *     event: train      { at, repo, phase, batch, … }  the merge train (merge-train.mjs)
  *
  * The snapshot also carries `queue` (the queue's GET view, done items included), and the queue's
  * frames ride on this stream, so a page that shows the fleet and its work holds one connection
@@ -17,6 +18,8 @@
  *     folder is not a repo. Checked when the chat's state changes and when a page connects, never
  *     on a timer.
  *   - last: the last line the chat said.
+ *   - ledger: the chat's work as git sees it (work-ledger.mjs, docs/MERGE-TRAIN-CONTRACT.md),
+ *     re-read when its state changes or a tool finishes, and when a page connects.
  *
  * Changes are gathered and sent once per FLUSH_MS, so a streaming reply costs a few frames a
  * second, not one per token. Nothing here runs while nobody is connected.
@@ -30,7 +33,7 @@ const BOARDS_MS = 2_000
 /** a folder's git status is trusted this long */
 const DIRTY_MS = 5_000
 
-export function createFleetStream({ sessions, queue }) {
+export function createFleetStream({ sessions, queue, ledger = null }) {
   const clients = new Set()
   const touched = new Set()
   let timer = null
@@ -69,6 +72,8 @@ export function createFleetStream({ sessions, queue }) {
       autopilot: !!s.autopilot,
       waiting: [...(s.pending?.values() ?? [])].map((p) => p.kind),
       dirty: dirtyOf(s.cwd),
+      // the chat's work as git sees it (work-ledger.mjs); null until its first read lands
+      ledger: ledger?.peek(s) ?? null,
       last,
     }
   }
@@ -91,6 +96,8 @@ export function createFleetStream({ sessions, queue }) {
   function touch(s, ev) {
     if (!clients.size) return
     if (ev?.t === 'status') dirtyOf(s.cwd, true)
+    // its work may have moved: a turn ended or a tool (an edit, a commit) finished
+    if (ev?.t === 'status' || ev?.t === 'tool_result') ledger?.poke(s)
     touched.add(s.id)
     timer ??= setTimeout(flush, FLUSH_MS)
   }
@@ -99,7 +106,10 @@ export function createFleetStream({ sessions, queue }) {
   function serve(req, res) {
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' })
     const open = [...sessions.values()].filter((s) => s.state !== 'closed')
-    for (const s of open) dirtyOf(s.cwd, true)
+    for (const s of open) {
+      dirtyOf(s.cwd, true)
+      ledger?.poke(s)
+    }
     write(res, 'snapshot', { at: Date.now(), rows: open.map(rowOf), queue: queue?.view({ includeDone: true }) ?? null })
     clients.add(res)
     const unwatch = queue?.watch((e) => write(res, 'queue', e))
@@ -111,5 +121,10 @@ export function createFleetStream({ sessions, queue }) {
     })
   }
 
-  return { touch, serve }
+  /** a frame for every page watching: the merge train's progress (`train`), the rebuild (`rebuild`) */
+  function broadcast(event, data) {
+    for (const res of clients) write(res, event, data)
+  }
+
+  return { touch, serve, broadcast }
 }

@@ -47,7 +47,8 @@ Your fleet tools (mcp__fleet__*):
 - fleet_send: send a chat a message, as if the user typed it. It is marked as coming from you.
 - fleet_suggest: put suggested actions in front of the user as cards they can send with one click.
 - fleet_answer: answer a question card another chat is waiting on (autopilot only).
-- fleet_spawn: open a new chat in a repo with a first prompt (at most 3 you opened may be open at once).
+- fleet_spawn: open a new chat in a repo with a first prompt (at most 8 you opened may be open at once; new ones are held while
+  this Mac or box1 is loaded or the away budget is low, and fleet_list's spawnSlots.heldBecause says why).
 - fleet_close: close a chat you opened once it has finished its brief. It must be idle, with no background work, nothing
   waiting on the user and no uncommitted changes (force skips all but the last). Closing frees a spawn slot. You cannot
   close a chat the user opened: suggest it with fleet_suggest.
@@ -65,6 +66,8 @@ Your fleet tools (mcp__fleet__*):
 
 - fleet_you: everything the user typed across all chats, in order.
 - fleet_note: remember what you have understood about a chat or about the user; notes come back in fleet_list.
+- fleet_ready: mark a chat's slice ready for the merge train, once you have seen it committed, typechecked and tested.
+  The train merges ready slices into local main itself: never merge by hand, and never push.
 - fleet_queue_add, fleet_queue_list, fleet_queue_update, fleet_queue_assign, fleet_queue_cancel: the work queue. Work you
   have decided on but not sent goes on it, not in your head: it survives the host restarting and a chat closing (a closed
   or parked chat's items go back to the unassigned pile). Give each item a one-line title and the full brief to send.
@@ -147,12 +150,15 @@ How to lead while the user is away:
 - fleet_list's "away" field lists what was auto-approved, what is left for the user, and every recovery. Check-in lines
   starting "Away mode:" say what just happened. Put these in the summary: they are what the user most needs to check.
 How to steer, away or not:
+- Each chat's "work" in fleet_list is read from git: its worktree, commits ahead of main, uncommitted files and the train's
+  state (merged / ready / checking / failed / conflict / not-ready). It is the truth; a chat's "now" line can be stale.
 - Verify at the source before saying a chat is stalled, done or ready: its branch commits and their times, the imports and
   entry points of what it built, its screenshots. A chat's "now" line is written after its last reply and goes stale.
 - Read a chat's youSaid before overriding it. A decision the user made in that chat stands over any general rule of yours.
 - Park a chat that is only waiting on the user (a download, a device, a sign-off), so its slot goes to work that can run.
 - Brief for slices: the smallest useful fix first, each committed on its own with its own ETA, handed over as it lands.
-  Merge each slice once you have seen it work, rather than waiting for the whole list.
+  Mark each slice ready (fleet_ready) once you have seen it work, rather than waiting for the whole list: the merge train
+  merges it into local main.
 - For parallel work on one surface, write the shared contract (exact API, who lands it first) into every brief before any
   chat starts, and give each surface one owner. Otherwise every chat builds its own temporary version.
 - Every UI or game brief carries the screen rules: verify invisibly (headless or offscreen, no windows or focus stealing),
@@ -250,6 +256,28 @@ const card = (x, notes = readNotes()) => {
   }
 }
 
+/**
+ * A chat's ledger as fleet_list shows it: taken from git, so it is the truth about the work where
+ * the chat's "now" line may be stale. null when the chat is not in a git repo.
+ */
+export function ledgerCard(l, now = Date.now()) {
+  if (!l) return null
+  const ago = (t) => (t ? `${Math.max(0, Math.round((now - t) / 60_000))}m ago` : null)
+  return {
+    state: l.state,
+    worktree: l.worktree,
+    branch: l.branch,
+    behindMain: l.behind,
+    aheadOfMain: l.ahead,
+    commits: l.commits.slice(0, 8).map((c) => `${c.sha.slice(0, 7)} ${clip(c.title, 90)} (${ago(c.at)})`),
+    uncommitted: l.dirty.count ? { files: l.dirty.count, oldestChange: ago(l.dirty.oldestAt) } : null,
+    lastCommit: ago(l.lastCommitAt),
+    ...(l.ready ? { ready: `${l.ready.sha.slice(0, 7)} via ${l.ready.via}, ${ago(l.ready.at)}` } : {}),
+    ...(l.overlaps?.length ? { overlaps: l.overlaps.map((o) => `${o.file} (also ${o.chat.slice(0, 8)})`) } : {}),
+    ...(l.train ? { train: { status: l.train.status, at: ago(l.train.at), ...(l.train.output ? { output: clip(l.train.output, 1200) } : {}) } } : {}),
+  }
+}
+
 // -------------------------------------------------------------------- waits ----
 /** what a conductor can wait for (fleet_wait) */
 export const WAIT_UNTIL = ['idle', 'background-done', 'needs-user', 'any-change']
@@ -312,7 +340,7 @@ export async function fleetServer(s, sessions, deps = {}) {
 export function fleetTools(s, sessions, tool, deps = {}) {
   // zod comes with the SDK; this package does not depend on it directly
   const { z } = createRequire(createRequire(import.meta.url).resolve('@anthropic-ai/claude-agent-sdk'))('zod')
-  const dirtyOf = deps.dirty ?? worktreeDirty
+  const dirtyOf = deps.dirty ?? ((x) => worktreeDirty(x.cwd))
   /** a queue tool: refused plainly when this host has no queue, and a queue refusal comes back as one */
   const queued = (fn) => async (args) => {
     if (!deps.queue) return fail('This host has no work queue.')
@@ -325,7 +353,7 @@ export function fleetTools(s, sessions, tool, deps = {}) {
   }
   const headOf = deps.head ?? gitHead
   return [
-      tool('fleet_list', 'List every other open chat: goal, state, where it stands, its planned next step, and whether it is waiting on the user.', {}, async () => {
+      tool('fleet_list', "List every other open chat: goal, state, where it stands, its planned next step, whether it is waiting on the user, and its work as git sees it (work: worktree, branch, commits ahead of main, uncommitted files, ready/merged/failed/conflict). Trust work over the chat's own 'now' line.", {}, async () => {
         const all = fleetOf(sessions, s)
         const notes = readNotes()
         return ok({
@@ -343,12 +371,14 @@ export function fleetTools(s, sessions, tool, deps = {}) {
             parkedAt: new Date(r.parkedAt).toISOString().slice(0, 16),
             reason: r.reason || null,
           })),
-          spawnSlots: (({ open, used, max, free }) => ({
+          spawnSlots: (({ open, used, max, free, held }) => ({
             used,
             max,
             free,
+            // under the cap but held: the Mac or box1 is loaded, or the away budget is low
+            ...(held ? { heldBecause: held } : {}),
             open: open.map((x) => `${x.id.slice(0, 8)} (${x.repo})${x.closeAfter ? ' closing after its checkpoint' : ''}`),
-          }))(spawnSlots(sessions)),
+          }))(spawnSlots(sessions, { hold: deps.hold ?? (() => null) })),
           // what you asked to be woken for (fleet_wait), with the time each has left
           waits: (s.waits ?? []).map(
             (w) => `${w.chat.slice(0, 8)} (${w.repo}) until ${w.until}, ${Math.max(0, Math.round((w.timeoutAt - Date.now()) / 60_000))}m left${w.note ? `: ${w.note}` : ''}`,
@@ -356,15 +386,17 @@ export function fleetTools(s, sessions, tool, deps = {}) {
           aboutTheUser: notes.you,
           chats: await Promise.all(
             all.map(async (x) => {
-              const c = card(x, notes)
+              // the chat's work as git sees it, never its own status line (work-ledger.mjs)
+              const work = deps.ledger ? ledgerCard(await deps.ledger(x).catch(() => null)) : undefined
+              const c = { ...card(x, notes), ...(work === undefined ? {} : { work }) }
               // idle for a day and clean: probably done (git only for the chats that look it)
               const looksStale = !!staleHint(x)
               if (!x.spawnedBy) {
-                const stale = looksStale ? staleHint(x, { dirty: await dirtyOf(x.cwd) }) : null
+                const stale = looksStale ? staleHint(x, { dirty: await dirtyOf(x) }) : null
                 return stale ? { ...c, stale } : c
               }
               // a chat you opened: can it be tidied away now, and if not, why not
-              const dirty = await dirtyOf(x.cwd)
+              const dirty = await dirtyOf(x)
               const why = closeRefusal(x, { dirty })
               const stale = looksStale ? staleHint(x, { dirty }) : null
               return { ...c, closable: !why, ...(why ? { notClosableBecause: why } : {}), ...(stale ? { stale } : {}) }
@@ -372,6 +404,23 @@ export function fleetTools(s, sessions, tool, deps = {}) {
           ),
         })
       }),
+      tool(
+        'fleet_ready',
+        "Mark a chat's slice ready for the merge train at its current commit, as a \"Ready: yes\" trailer would. Only once you have seen that it is committed, typechecked and its affected tests pass (read the chat, check its work in fleet_list). The train re-checks it on main and fast-forwards local main when green; it never pushes.",
+        { chat: z.string() },
+        async ({ chat }) => {
+          if (!deps.ready) return fail('This host has no merge train.')
+          const x = find(sessions, s, chat)
+          if (!x) return fail(`No single open chat matches "${chat}". Call fleet_list for the ids.`)
+          try {
+            const l = await deps.ready(x)
+            fleetReport({ action: 'ready', conductor: s, chat: x, text: `marked ready at ${l?.ready?.sha?.slice(0, 7) ?? 'its tip'}` })
+            return ok(`Marked ${x.id.slice(0, 8)} (${x.repo}) ready: ${l?.branch ?? ''} ${l?.ahead ?? 0} commit(s) ahead of ${l?.base ?? 'main'}. The train takes it from here.`)
+          } catch (e) {
+            return fail(`Not marked ready: ${String(e?.message ?? e)}`)
+          }
+        },
+      ),
       tool(
         'fleet_read',
         "Read a chat's recent messages: the user's prompts, Claude's replies, how turns ended and what it is waiting on.",
@@ -482,7 +531,7 @@ export function fleetTools(s, sessions, tool, deps = {}) {
       ),
       tool(
         'fleet_spawn',
-        'Open a new chat in a repo with a first prompt, as the user would from the app. At most 3 chats you opened may be open at once. It is marked as yours, asks for permissions and follows away mode like any other chat, and is logged in the away summary.',
+        'Open a new chat in a repo with a first prompt, as the user would from the app. At most 8 chats you opened may be open at once, and new ones are held while this Mac or box1 is loaded or the away budget is low (the refusal says why). It is marked as yours, asks for permissions and follows away mode like any other chat, and is logged in the away summary.',
         {
           cwd: z.string().describe("the repo's folder: an absolute path, or the repo name of an open chat to use its folder"),
           prompt: z.string().min(1).max(8000).describe('the first message, written as the user would say it'),
@@ -516,7 +565,7 @@ export function fleetTools(s, sessions, tool, deps = {}) {
           if (!x) return fail(`No single open chat matches "${chat}". Call fleet_list for the ids.`)
           // the cheap refusals first: no git call for a chat you may not close anyway
           if (!x.spawnedBy) return fail(closeRefusal(x, { dirty: false }))
-          const why = closeRefusal(x, { dirty: await dirtyOf(x.cwd), force })
+          const why = closeRefusal(x, { dirty: await dirtyOf(x), force })
           if (why) return fail(`Not closed: ${why}`)
           try {
             await deps.close(s, x, { reason: reason ?? '', force })
@@ -540,7 +589,7 @@ export function fleetTools(s, sessions, tool, deps = {}) {
           if (!x) return fail(`No single open chat matches "${chat}". Call fleet_list for the ids.`)
           if (!x.spawnedBy) return fail(closeRefusal(x, { dirty: false }))
           if (!x.sdkSessionId) return fail(`${x.id.slice(0, 8)} has no conversation to keep yet: close it with fleet_close instead.`)
-          const why = closeRefusal(x, { dirty: await dirtyOf(x.cwd), force })
+          const why = closeRefusal(x, { dirty: await dirtyOf(x), force })
           if (why) return fail(`Not parked: ${why}`)
           try {
             await deps.park(s, x, { reason: reason ?? '', force })
@@ -819,7 +868,7 @@ export function fleetTools(s, sessions, tool, deps = {}) {
  * turn is over, close it if it may be closed, otherwise leave it open and say why. The host calls
  * this on every state change; `deps` has `dirty`, `close` (the host's) and `tell` (watchFleet's).
  */
-export async function settleCheckpointClose(x, sessions, { dirty = worktreeDirty, close, tell }) {
+export async function settleCheckpointClose(x, sessions, { dirty = (x) => worktreeDirty(x.cwd), close, tell }) {
   const p = x.closeAfter
   if (!p || p.settling || ['running', 'starting'].includes(x.state)) return null
   const c = sessions.get(p.conductor)
@@ -845,7 +894,7 @@ export async function settleCheckpointClose(x, sessions, { dirty = worktreeDirty
   if (!p.restored && !after.some((e) => e.t === 'result')) return null
   const line = clip(after.filter((e) => e.t === 'text' && !e.sub && /Checkpoint:/.test(e.text ?? '')).at(-1)?.text.match(/Checkpoint:.*/)?.[0], 200)
   p.settling = true
-  const why = closeRefusal(x, { dirty: await dirty(x.cwd) })
+  const why = closeRefusal(x, { dirty: await dirty(x) })
   p.settling = false
   if (why) return done('left', `${name} not closed after its checkpoint${line ? ` (${line})` : ''}: ${why}`)
   x.closeAfter = null
@@ -867,7 +916,7 @@ export const restoredCloseAfter = (saved, { busy = false } = {}) =>
  * Autopilot: wake idle conductors when the chats they lead change. `send` is the conductor's own
  * Session.send, so a check-in looks like any other turn in its chat.
  */
-export function watchFleet(sessions, { dirty = worktreeDirty } = {}) {
+export function watchFleet(sessions, { dirty = (x) => worktreeDirty(x.cwd) } = {}) {
   const changed = new Map() // conductor → Map(chat id → state)
   const awayLines = new Map() // conductor → what away mode did since its last check-in
   const waitLines = new Map() // conductor → [{ chat, line }]: the waits it asked for that are over
@@ -979,7 +1028,7 @@ export function watchFleet(sessions, { dirty = worktreeDirty } = {}) {
         if (seen.has(x.id) || x.account?.demo || !staleHint(x)) continue
         seen.add(x.id)
         if (Date.now() - (hinted.get(x.id) ?? -Infinity) < STALE_MS) continue
-        const hint = staleHint(x, { dirty: await dirty(x.cwd) })
+        const hint = staleHint(x, { dirty: await dirty(x) })
         if (!hint) continue
         hinted.set(x.id, Date.now())
         const what = x.spawnedBy ? 'you opened it: close or park it' : 'the user opened it: suggest closing it with fleet_suggest'

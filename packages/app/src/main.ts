@@ -39,6 +39,7 @@ import {
   workspaceCommands,
 } from './panels.ts'
 import { createSpotlight, type SpotCommand } from './spotlight.ts'
+import { initStableUpdate } from './stable-update.ts'
 import { registerDatabasesPanel } from './supabase.ts'
 import { applyTheme, initTheme, themeId } from './themes.ts'
 import { registerUsersPanel } from './users-panel.ts'
@@ -3046,6 +3047,8 @@ async function showVersion() {
 }
 showVersion()
 initTheme()
+// the stable app's next version, once built: a quiet restart prompt in the header
+initStableUpdate()
 initSettings({
   layout: () => layoutMode,
   setLayout,

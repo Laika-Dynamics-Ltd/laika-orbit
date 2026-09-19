@@ -26,6 +26,7 @@
  */
 import './cockpit.css'
 import type { QueueItem } from './queue-view.ts'
+import { lastCommit, ledgerChips } from './work-ledger.ts'
 
 const API = '/api/control/agent'
 const QAPI = `${API}/queue`
@@ -55,6 +56,8 @@ export type FleetRow = {
   waiting: string[]
   /** uncommitted files in its folder; null when that is not a repo */
   dirty: number | null
+  /** its work as git sees it (work-ledger.ts); null until read, or not in a repo */
+  ledger?: import('./work-ledger.ts').Ledger | null
   last: string
   updatedAt: number
 }
@@ -157,6 +160,8 @@ export function subscribeFleet(fn: () => void): () => void {
   }
 }
 
+/** one open chat's row, as last pushed */
+export const fleetRow = (id: string) => rows.get(id) ?? null
 /** open chats the cockpit leads: every open chat but conductors */
 export const fleetChats = () => [...rows.values()].filter((r) => r.role !== 'conductor')
 export const closedChats = () => [...gone.values()].filter((r) => r.role !== 'conductor')
@@ -348,7 +353,8 @@ export function mountCockpit(host: HTMLElement): {
           : `<span class="ck-f late" title="Past its estimate">${mins(-left)} over</span>`,
       )
     }
-    if (r.dirty)
+    // with a ledger, its chips say it (uncommitted count and age among them)
+    if (r.dirty && !r.ledger)
       facts.push(
         `<span class="ck-f dirty" title="Files changed in ${esc(r.repo)} and not committed yet">${r.dirty} uncommitted</span>`,
       )
@@ -360,6 +366,7 @@ export function mountCockpit(host: HTMLElement): {
       <span class="ck-row1"><span class="ck-dot"></span><span class="ck-t">${esc(chatName(r))}</span></span>
       <span class="ck-row2"><span class="ck-pill">${esc(PILL[t] ?? '')}${age ? `<em>${esc(age)}</em>` : ''}</span><span class="ck-repo">${esc(r.repo)}${r.group ? ` · ${esc(r.group)}` : ''}</span></span>
       <span class="ck-now k-${line.k}${line.said ? ' said' : ''}" title="${esc(line.text)}">${esc(line.text)}</span>
+      ${r.ledger ? `<span class="ck-work">${ledgerChips(r.ledger, { compact: true, now })}${lastCommit(r.ledger, now)}</span>` : ''}
       ${facts.length ? `<span class="ck-facts">${facts.join('')}</span>` : ''}
     </button>`
   }
