@@ -20,6 +20,7 @@ import { startReporting } from './pulse-client.mjs'
 import { handleSupabase } from './supabase.mjs'
 import { handleLicense } from './license.mjs'
 import { handleVoice } from './voice.mjs'
+import { handleDrop, startDropZone } from './drop-api.mjs'
 import { readdir, readFile as fsRead, writeFile, mkdir, stat, realpath, rename, rm } from 'node:fs/promises'
 import { execFile, execFileSync } from 'node:child_process'
 import { promisify } from 'node:util'
@@ -801,6 +802,8 @@ createHttp(async (req, res) => {
     // Orbit Pro licence: activation and status (see license.mjs)
     if (await handleLicense(url, req, res)) return
     if (await handleVoice(url, req, res)) return
+    // the drop zone: peers on the LAN, and the yes that lets one send a file here (see drop.mjs)
+    if (await handleDrop(url, req, res)) return
     // Supabase: each account's projects, their schemas and the SQL console (see supabase.mjs)
     if (await handleSupabase(url, req, res)) return
     if (url.pathname === '/api/version') {
@@ -1151,5 +1154,11 @@ createHttp(async (req, res) => {
   console.log(`  showreel      →  ${showreel ? SHOWREEL_DIR : `not found (clone laika-showreel to ${SHOWREEL_DIR}, or set SHOWREEL_DIR)`}`)
   // reporting only ever starts when this Mac has opted in; startReporting is a no-op otherwise
   appVersion().then((v) => startReporting({ app: v.version }))
+  // the drop zone is the one thing here that listens to the network; it accepts nothing without a
+  // yes from this machine, and ORBIT_DROP=0 keeps it from binding at all
+  startDropZone().then(
+    (z) => console.log(`  drop zone     →  ${z ? `${z.me.name} on :${z.port}, files land in ${z.inbox}` : 'off (ORBIT_DROP=0)'}`),
+    (e) => console.log(`  drop zone     →  not listening: ${String(e?.message ?? e)}`),
+  )
   console.log(`  HMR live. Edit packages/app/src/*.ts and the browser updates.\n`)
 })
