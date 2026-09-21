@@ -27,6 +27,10 @@
  * and the number of bytes fixed before it is asked — so a yes to "4 files · 8 MB" cannot be turned
  * into four thousand by the sender.
  *
+ * A transfer that stops half way keeps what arrived in <inbox>/.partials, and the next attempt at
+ * the same file carries on from there rather than starting again. Picking it up is still a fresh
+ * question — the part is what is saved, not the permission.
+ *
  *   startDrop()          → peers(), offers(), batches(), decide(), decideBatch(), sendFile(), close()
  *   GET  /drop/hello                 who this Orbit is, for a peer to check it is really here
  *   POST /drop/offer                 { from, file, batch? } → an offer id; writes nothing
@@ -34,8 +38,8 @@
  *   PUT  /drop/file/<ticket>         the bytes, once, into the inbox
  */
 import { Bonjour } from 'bonjour-service'
-import { randomBytes, randomUUID } from 'node:crypto'
-import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { createHash, randomBytes, randomUUID } from 'node:crypto'
+import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, rmdirSync, statSync, writeFileSync } from 'node:fs'
 import { rename, rm, stat } from 'node:fs/promises'
 import { createServer, request as httpRequest } from 'node:http'
 import { homedir, hostname } from 'node:os'
@@ -197,6 +201,23 @@ export async function startDrop({ port = DROP_PORT, inbox = INBOX, announce = tr
   const byTicket = (t) => (t ? [...offers.values()].find((o) => o.ticket === t) : null)
 
   /**
+   * A transfer that stopped half way leaves what arrived in <inbox>/.partials, under a name
+   * derived from who sent it, what it is called, how big it is and when it was last written — so
+   * the next attempt at the same file finds it, a different file never does, and the part outlives
+   * the app rather than only the process. The final name is still chosen at the end, when the file
+   * is whole, which is why the part is not simply "<target>.part".
+   */
+  const partPath = (offer) => join(inbox, '.partials', `${createHash('sha256').update(`${offer.from.id}|${offer.file.rel ?? offer.file.name}|${offer.file.size}|${offer.file.mtime ?? 0}`).digest('hex').slice(0, 32)}.part`)
+  const haveFor = (offer) => {
+    try {
+      const st = statSync(partPath(offer))
+      return st.isFile() && st.size < offer.file.size ? st.size : 0
+    } catch {
+      return 0
+    }
+  }
+
+  /**
    * Where a file lands. A loose file goes in the inbox under a free name; a file from a dropped
    * folder keeps the shape it was dragged in with, under one top folder chosen once for the whole
    * batch — so a second copy of "photos" arrives as "photos (2)" rather than being mixed in.
@@ -262,7 +283,7 @@ export async function startDrop({ port = DROP_PORT, inbox = INBOX, announce = tr
       const offer = {
         id: randomUUID(),
         from,
-        file: { name: rel ? rel.split('/').pop() : safeName(body.file.name), size, rel },
+        file: { name: rel ? rel.split('/').pop() : safeName(body.file.name), size, rel, mtime: Number(body?.file?.mtime) || 0 },
         batch: batch?.id ?? null,
         state: 'pending',
         at: Date.now(),
@@ -288,35 +309,48 @@ export async function startDrop({ port = DROP_PORT, inbox = INBOX, announce = tr
     if (req.method === 'GET' && path.startsWith('/drop/offer/')) {
       const o = offers.get(path.slice('/drop/offer/'.length))
       if (!o) return json(res, 404, { error: 'no such offer' })
-      return json(res, 200, { state: o.state, ticket: o.state === 'accepted' ? o.ticket : undefined, saved: o.saved ? basename(o.saved) : undefined })
+      return json(res, 200, { state: o.state, ticket: o.state === 'accepted' ? o.ticket : undefined, have: o.state === 'accepted' ? haveFor(o) : undefined, saved: o.saved ? basename(o.saved) : undefined })
     }
 
     // the bytes. Only a ticket minted by an accept opens this, and only once.
     if (req.method === 'PUT' && path.startsWith('/drop/file/')) {
       const offer = byTicket(path.slice('/drop/file/'.length))
       if (!offer || offer.state !== 'accepted') return json(res, 403, { error: 'that transfer was not accepted' })
-      if (Number(req.headers['content-length'] ?? offer.file.size) !== offer.file.size) return json(res, 400, { error: 'that is not the file that was accepted' })
+      // a second attempt at a file that stopped half way carries on from what is already here,
+      // and only from exactly that: a sender that thinks otherwise is told where to start
+      const have = haveFor(offer)
+      const at = Number(req.headers['x-drop-from'] ?? 0)
+      if (!Number.isInteger(at) || at !== have) return json(res, 409, { error: `start again from ${have}`, have })
+      if (Number(req.headers['content-length'] ?? offer.file.size - have) !== offer.file.size - have) return json(res, 400, { error: 'that is not the file that was accepted' })
       offer.ticket = null // single use: a second request carrying the same ticket finds nothing
       offer.state = 'receiving'
-      offer.received = 0
-      mkdirSync(inbox, { recursive: true })
-      const target = placeFor(offer)
-      const part = `${target}.part`
+      offer.received = have
+      const part = partPath(offer)
+      mkdirSync(dirname(part), { recursive: true })
       const limit = new Transform({
         transform(chunk, _enc, cb) {
           offer.received += chunk.length
           cb(offer.received > offer.file.size ? new Error('more bytes than were offered') : null, chunk)
         },
       })
+      let target
       try {
-        await pipeline(req, limit, createWriteStream(part))
+        await pipeline(req, limit, createWriteStream(part, { flags: have ? 'a' : 'w' }))
         if (offer.received !== offer.file.size) throw new Error('the transfer ended early')
+        mkdirSync(inbox, { recursive: true })
+        target = placeFor(offer)
         await rename(part, target)
+        // the partials folder only exists while something is half way here
+        try {
+          rmdirSync(dirname(part))
+        } catch {}
       } catch (e) {
-        await rm(part, { force: true }).catch(() => {})
+        // what did arrive stays, so the next attempt at the same file picks it up rather than
+        // starting again; only a part that overran is no use to anyone
+        if (offer.received > offer.file.size) await rm(part, { force: true }).catch(() => {})
         offer.state = 'failed'
         offer.error = String(e?.message ?? e).slice(0, 160)
-        return json(res, 400, { error: offer.error })
+        return json(res, 400, { error: offer.error, have: haveFor(offer) })
       }
       offer.state = 'done'
       offer.saved = target
@@ -325,6 +359,15 @@ export async function startDrop({ port = DROP_PORT, inbox = INBOX, announce = tr
 
     json(res, 404, { error: 'not a drop route' })
   })
+
+  // a file someone gave up on a week ago is not waiting to be picked up; it is litter
+  try {
+    const partials = join(inbox, '.partials')
+    for (const f of readdirSync(partials)) {
+      const at = join(partials, f)
+      if (f.endsWith('.part') && Date.now() - statSync(at).mtimeMs > 7 * 24 * 3600_000) rmSync(at, { force: true })
+    }
+  } catch {}
 
   await new Promise((ok, fail) => {
     server.once('error', fail)
@@ -374,7 +417,7 @@ export async function startDrop({ port = DROP_PORT, inbox = INBOX, announce = tr
     offers: () => {
       prune()
       // the ticket never leaves this module, and `saved` is the name it went under, not the path
-      return [...offers.values()].map(({ ticket, saved, ...o }) => (saved ? { ...o, saved: basename(saved) } : o))
+      return [...offers.values()].map(({ ticket, saved, ...o }) => ({ ...o, saved: saved ? basename(saved) : undefined, have: o.state === 'pending' || o.state === 'failed' ? haveFor(o) : undefined }))
     },
     /**
      * The whole of rule 1: until this is called with true, the sender has been told "pending" and
@@ -438,7 +481,7 @@ export async function sendFile(peer, path, { from = identity(), onProgress = () 
     if (!r.ok) throw new Error(body.error || `${peer.name ?? peer.host} answered ${r.status}`)
     return body
   }
-  const file = { name: basename(path), size: info.size, rel }
+  const file = { name: basename(path), size: info.size, rel, mtime: Math.floor(info.mtimeMs) }
   const { offer } = await ask('/drop/offer', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -447,10 +490,13 @@ export async function sendFile(peer, path, { from = identity(), onProgress = () 
 
   const until = Date.now() + timeout
   let ticket = null
+  /** how much of this file the far end kept from an attempt that stopped half way */
+  let at = 0
   while (Date.now() < until) {
     const s = await ask(`/drop/offer/${offer}`)
     if (s.state === 'accepted') {
       ticket = s.ticket
+      at = Number(s.have) > 0 && Number(s.have) < file.size ? Number(s.have) : 0
       break
     }
     if (s.state !== 'pending') throw new Error(s.state === 'declined' ? `${peer.name ?? 'they'} declined the file` : `the offer ${s.state}`)
@@ -458,8 +504,8 @@ export async function sendFile(peer, path, { from = identity(), onProgress = () 
   }
   if (!ticket) throw new Error('nobody answered the offer')
 
-  let sent = 0
-  const body = createReadStream(path)
+  let sent = at
+  const body = createReadStream(path, at ? { start: at } : {})
   body.on('data', (c) => {
     sent += c.length
     onProgress({ sent, size: file.size })
@@ -471,7 +517,7 @@ export async function sendFile(peer, path, { from = identity(), onProgress = () 
         port: peer.port,
         path: `/drop/file/${ticket}`,
         method: 'PUT',
-        headers: { 'content-type': 'application/octet-stream', 'content-length': file.size },
+        headers: { 'content-type': 'application/octet-stream', 'content-length': file.size - at, ...(at ? { 'x-drop-from': String(at) } : {}) },
       },
       (r) => {
         let out = ''

@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
+import { request as httpRequest } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -109,14 +110,15 @@ describe('offer, answer, transfer', () => {
 
   /** the sender is this test process, with its own identity rather than the machine's */
   const sendFileFrom = (to, path, opts) => sendFile(to, path, { ...opts, from: me })
-  const inboxFiles = () => (existsSync(inbox) ? readdirSync(inbox).sort() : [])
+  const inboxFiles = () => (existsSync(inbox) ? readdirSync(inbox).filter((f) => !f.startsWith('.')).sort() : [])
 })
 
 /** a small wait-for, so a test can let the offer arrive before answering it */
 async function waitFor(cond, ms = 2000) {
   const until = Date.now() + ms
   while (Date.now() < until) {
-    if (cond()) return
+    const got = cond()
+    if (got) return got
     await new Promise((ok) => setTimeout(ok, 10))
   }
   throw new Error('timed out waiting')
@@ -152,7 +154,7 @@ describe('a folder, or an armful of files, as one question', () => {
   const under = (root) => {
     const out = []
     const walk = (at, prefix) => {
-      for (const e of readdirSync(at, { withFileTypes: true }).sort((x, y) => x.name.localeCompare(y.name))) {
+      for (const e of readdirSync(at, { withFileTypes: true }).filter((e) => !e.name.startsWith('.')).sort((x, y) => x.name.localeCompare(y.name))) {
         if (e.isDirectory()) walk(join(at, e.name), `${prefix}${e.name}/`)
         else out.push(prefix + e.name)
       }
@@ -201,5 +203,83 @@ describe('a folder, or an armful of files, as one question', () => {
   it('answers a batch once and once only', async () => {
     expect(them.decideBatch('b1', true)).toBe(null)
     expect(them.decideBatch('nothing-like-it', true)).toBe(null)
+  })
+})
+
+describe('a transfer that stopped half way', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'drop-resume-'))
+  const inbox = join(dir, 'inbox')
+  const big = join(dir, 'big.bin')
+  const SIZE = 200_000
+  writeFileSync(big, Buffer.alloc(SIZE, 3))
+  const me = { id: 'sender-id', name: 'mac' }
+  const asked = []
+  let them
+  let peer
+
+  beforeAll(async () => {
+    them = await startDrop({ port: 0, host: '127.0.0.1', inbox, announce: false, me: { id: 'receiver-id', name: 'box1' }, onOffer: (o) => asked.push(o) })
+    peer = { id: 'receiver-id', name: 'box1', host: '127.0.0.1', port: them.port }
+  })
+  afterAll(async () => {
+    await them?.close()
+  })
+
+  const offerBig = async () => {
+    const r = await fetch(`http://127.0.0.1:${them.port}/drop/offer`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ from: me, file: { name: 'big.bin', size: SIZE, mtime: Math.floor(statSync(big).mtimeMs) } }),
+    })
+    return (await r.json()).offer
+  }
+  const ticketFor = async (id) => (await (await fetch(`http://127.0.0.1:${them.port}/drop/offer/${id}`)).json()).ticket
+
+  /** a sender that dies with the file half sent, which is the whole point of the exercise */
+  const cutOff = (ticket, bytes) =>
+    new Promise((ok) => {
+      const req = httpRequest({ host: '127.0.0.1', port: them.port, path: `/drop/file/${ticket}`, method: 'PUT', headers: { 'content-length': SIZE } }, () => {})
+      req.on('error', ok)
+      req.on('close', ok)
+      req.write(Buffer.alloc(bytes, 3))
+      setTimeout(() => req.destroy(), 60)
+    })
+
+  it('keeps what arrived, and says how much of it there is', async () => {
+    const id = await offerBig()
+    them.decide(id, true)
+    await cutOff(await ticketFor(id), 80_000)
+    const failed = await waitFor(() => them.offers().find((o) => o.id === id && o.state === 'failed'))
+    expect(failed.have).toBeGreaterThan(0)
+    expect(failed.have).toBeLessThan(SIZE)
+    // the half that arrived is kept out of the way, not in the inbox as if it were a file
+    expect(existsSync(inbox) ? readdirSync(inbox).filter((f) => !f.startsWith('.')) : []).toEqual([])
+    expect(readdirSync(join(inbox, '.partials'))).toHaveLength(1)
+  })
+
+  it('carries on from there rather than starting again, and still asks first', async () => {
+    const seen = []
+    const sent = sendFile(peer, big, { from: me, poll: 20, onProgress: (p) => seen.push(p.sent) })
+    const again = await waitFor(() => asked.find((o) => o.state === 'pending'))
+    // picking a transfer up is a fresh question: the part is what was saved, not the permission
+    expect(them.offers().find((o) => o.id === again.id)).toMatchObject({ state: 'pending' })
+    them.decide(again.id, true)
+
+    expect(await sent).toMatchObject({ ok: true, saved: 'big.bin' })
+    expect(seen[0]).toBeGreaterThan(80_000) // it began where the last attempt stopped
+    expect(seen.at(-1)).toBe(SIZE)
+    const landed = readFileSync(join(inbox, 'big.bin'))
+    expect(landed).toHaveLength(SIZE)
+    expect(landed.every((b) => b === 3)).toBe(true)
+    // and the part is gone once the file is whole
+    expect(existsSync(join(inbox, '.partials'))).toBe(false)
+  })
+
+  it('will not take bytes that start anywhere else', async () => {
+    const id = await offerBig()
+    them.decide(id, true)
+    const r = await fetch(`http://127.0.0.1:${them.port}/drop/file/${await ticketFor(id)}`, { method: 'PUT', headers: { 'x-drop-from': '50000' }, body: 'x' })
+    expect(r.status).toBe(409)
+    expect((await r.json()).have).toBe(0)
   })
 })

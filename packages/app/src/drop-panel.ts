@@ -22,6 +22,8 @@ type Offer = {
   file: { name: string; size: number; rel: string | null }
   batch: string | null
   state: 'pending' | 'accepted' | 'receiving' | 'done' | 'declined' | 'expired' | 'failed'
+  /** how much of this file is already here from an attempt that stopped half way */
+  have?: number
   received?: number
   saved?: string
   error?: string
@@ -139,6 +141,8 @@ function mountDrop(host: HTMLElement) {
 
   /** what has been dropped and not yet sent anywhere; the panel is waiting for a peer to be picked */
   let held: Held[] = []
+  /** the last drop that was sent, so one that stopped can be picked up where it left off */
+  let lastSent: { peer: string; list: Held[] } | null = null
   /** the last thing that went wrong here, shown until the next thing happens */
   let trouble = ''
   let state: State | null = null
@@ -241,7 +245,8 @@ function mountDrop(host: HTMLElement) {
           0,
         )
         const name = b ? (b.name ?? plural(b.count, 'file')) : (first.saved ?? first.file.name)
-        const from = `${first.from.name}${b ? ` · ${plural(b.count, 'file')}` : ''} · ${fmt(size)}`
+        const already = list.reduce((n, o) => n + (o.have ?? 0), 0)
+        const from = `${first.from.name}${b ? ` · ${plural(b.count, 'file')}` : ''} · ${fmt(size)}${already ? ` · ${fmt(already)} already here` : ''}`
         if (list.some((o) => o.state === 'pending'))
           return row(
             esc(name),
@@ -329,6 +334,7 @@ function mountDrop(host: HTMLElement) {
   /** send what is held, as one drop: every file declares the shape of the whole so it is one question */
   async function sendHeld(peerId: string) {
     const list = held
+    lastSent = { peer: peerId, list }
     const label = heldLabel()
     const bytes = list.reduce((n, h) => n + h.file.size, 0)
     const id = crypto.randomUUID()
@@ -361,6 +367,13 @@ function mountDrop(host: HTMLElement) {
       held = []
       trouble = ''
       return render()
+    }
+    if (el.closest('.dz-retry')) {
+      // the far end kept what arrived, so this carries on rather than starting again
+      if (!lastSent) return
+      held = lastSent.list
+      render()
+      return sendHeld(lastSent.peer)
     }
     if (el.closest('.dz-again')) {
       await ask('/api/drop/peers/refresh', { method: 'POST' }).catch(() => {})

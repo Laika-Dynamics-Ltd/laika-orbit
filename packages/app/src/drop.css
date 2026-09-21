@@ -24,6 +24,7 @@
 .dz h4 em { font-style: normal; text-transform: none; letter-spacing: 0; color: var(--n18) }
 .dz-again { margin-left: auto; padding: 1px 6px; border: 1px solid var(--n13); border-radius: 5px; background: none; font: 500 9.5px/1.4 inherit; letter-spacing: 0.04em; text-transform: uppercase; color: var(--n24); cursor: pointer }
 .dz-again:hover { border-color: var(--n18); color: var(--n30) }
+.dz-retry { flex: none; margin-left: 8px }
 
 .dz-row { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-top: 1px solid var(--n10) }
 .dz-row:first-of-type { border-top: none }
