@@ -1,8 +1,8 @@
-import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { isLocalAddress, peerFrom, safeName, sendFile, startDrop, uniquePath } from '../drop.mjs'
+import { isLocalAddress, peerFrom, safeName, safeRelPath, sendFile, startDrop, uniquePath } from '../drop.mjs'
 
 describe('what may reach the drop zone', () => {
   it('takes the local link and nothing else', () => {
@@ -19,6 +19,14 @@ describe('what may reach the drop zone', () => {
     expect(safeName('')).toBe('dropped-file')
     expect(safeName('C:\\Users\\me\\notes.md')).toBe('notes.md')
     expect(safeName('a\nb.txt')).toBe('ab.txt')
+  })
+
+  it('keeps a folder inside the inbox whatever its paths say', () => {
+    expect(safeRelPath('photos/holiday/../../../etc/hosts')).toBe('photos/holiday/etc/hosts')
+    expect(safeRelPath('/Users/me/photos/a.jpg')).toBe('Users/me/photos/a.jpg')
+    expect(safeRelPath('..')).toBe('dropped-file')
+    expect(safeRelPath('deck/../../..')).toBe('deck')
+    expect(safeRelPath('a/b/c/d/e/f/g/h/i/j/k/l/m/n.txt').split('/')).toHaveLength(12)
   })
 
   it('never overwrites what is already in the inbox', () => {
@@ -113,3 +121,85 @@ async function waitFor(cond, ms = 2000) {
   }
   throw new Error('timed out waiting')
 }
+
+describe('a folder, or an armful of files, as one question', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'drop-batch-'))
+  const inbox = join(dir, 'inbox')
+  const src = join(dir, 'src')
+  mkdirSync(join(src, 'sub'), { recursive: true })
+  for (const [p, body] of [
+    ['a.txt', 'one'],
+    ['b.txt', 'two'],
+    ['sub/c.txt', 'three'],
+    ['d.txt', 'four'],
+  ])
+    writeFileSync(join(src, p), body)
+  /** a snapshot per offer as it arrived, because the offer itself goes on changing */
+  const asked = []
+  const me = { id: 'sender-id', name: 'mac' }
+  let them
+  let peer
+
+  beforeAll(async () => {
+    them = await startDrop({ port: 0, host: '127.0.0.1', inbox, announce: false, me: { id: 'receiver-id', name: 'box1' }, onOffer: (o) => asked.push({ id: o.id, state: o.state, rel: o.file.rel, batch: o.batch }) })
+    peer = { id: 'receiver-id', name: 'box1', host: '127.0.0.1', port: them.port }
+  })
+  afterAll(async () => {
+    await them?.close()
+  })
+
+  const send = (file, rel, batch) => sendFile(peer, join(src, file), { from: me, poll: 20, rel, batch })
+  const under = (root) => {
+    const out = []
+    const walk = (at, prefix) => {
+      for (const e of readdirSync(at, { withFileTypes: true }).sort((x, y) => x.name.localeCompare(y.name))) {
+        if (e.isDirectory()) walk(join(at, e.name), `${prefix}${e.name}/`)
+        else out.push(prefix + e.name)
+      }
+    }
+    if (existsSync(root)) walk(root, '')
+    return out
+  }
+
+  it('asks once for the whole folder, then keeps its shape', async () => {
+    const batch = { id: 'b1', name: 'photos', count: 3, size: 11 }
+    const first = send('a.txt', 'photos/a.txt', batch)
+    await waitFor(() => asked.length === 1)
+    expect(them.batches()[0]).toMatchObject({ name: 'photos', count: 3, size: 11, answered: null })
+    expect(under(inbox)).toEqual([])
+
+    them.decideBatch('b1', true)
+    expect(await first).toMatchObject({ ok: true, saved: 'a.txt' })
+    // the rest of an answered batch are not asked about again
+    await Promise.all([send('b.txt', 'photos/b.txt', batch), send('sub/c.txt', 'photos/sub/c.txt', batch)])
+    expect(asked.slice(1).map((a) => a.state)).toEqual(['accepted', 'accepted'])
+    expect(under(inbox)).toEqual(['photos/a.txt', 'photos/b.txt', 'photos/sub/c.txt'])
+    expect(readFileSync(join(inbox, 'photos', 'sub', 'c.txt'), 'utf8')).toBe('three')
+  })
+
+  it('will not let a batch grow past the answer it was given', async () => {
+    await expect(send('d.txt', 'photos/d.txt', { id: 'b1', name: 'photos', count: 3, size: 11 })).rejects.toThrow(/already full/)
+    expect(under(inbox)).toEqual(['photos/a.txt', 'photos/b.txt', 'photos/sub/c.txt'])
+  })
+
+  it('declines all of them at once, and keeps the second folder beside the first', async () => {
+    const no = { id: 'b2', name: 'photos', count: 2, size: 7 }
+    const both = Promise.allSettled([send('a.txt', 'photos/a.txt', no), send('b.txt', 'photos/b.txt', no)])
+    await waitFor(() => them.batches().some((b) => b.id === 'b2'))
+    them.decideBatch('b2', false)
+    expect((await both).map((r) => r.status)).toEqual(['rejected', 'rejected'])
+    expect(under(inbox)).toEqual(['photos/a.txt', 'photos/b.txt', 'photos/sub/c.txt'])
+
+    const yes = { id: 'b3', name: 'photos', count: 1, size: 3 }
+    const again = send('a.txt', 'photos/a.txt', yes)
+    await waitFor(() => them.batches().some((b) => b.id === 'b3'))
+    them.decideBatch('b3', true)
+    await again
+    expect(under(inbox)).toContain('photos (2)/a.txt')
+  })
+
+  it('answers a batch once and once only', async () => {
+    expect(them.decideBatch('b1', true)).toBe(null)
+    expect(them.decideBatch('nothing-like-it', true)).toBe(null)
+  })
+})

@@ -8,7 +8,10 @@
  *   POST /api/drop/peers/refresh    ask the network again instead of waiting for the next advert
  *   GET  /api/drop/offers           what has been offered to this machine, and what came of it
  *   POST /api/drop/offers/<id>      { accept: true | false } — the yes, or the no
+ *   POST /api/drop/batches/<id>     the same answer for a whole many-file drop, given once
  *   POST /api/drop/send?to=&name=   the dropped file's bytes as the body; answers with a send id
+ *                                   &rel= its path inside a dropped folder, &batch=&count=&bytes=
+ *                                   the shape of the drop it belongs to
  *   POST /api/drop/reveal           show the inbox in the Finder
  *
  * A send names a *peer id*, never a host: the address comes from what Bonjour saw, so this route
@@ -30,7 +33,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pipeline } from 'node:stream/promises'
-import { safeName, startDrop } from './drop.mjs'
+import { safeName, safeRelPath, startDrop } from './drop.mjs'
 
 const OFF = process.env.ORBIT_DROP === '0'
 let zone = null
@@ -89,8 +92,11 @@ function outgoing() {
 async function startSend(z, req, res, url) {
   const peer = z.peers().find((p) => p.id === url.searchParams.get('to'))
   if (!peer) return json(res, 404, { error: 'that Orbit is no longer on the network' })
-  const name = safeName(url.searchParams.get('name') || 'dropped-file')
-  const send = { id: randomUUID(), to: { id: peer.id, name: peer.name }, file: { name, size: Number(req.headers['content-length'] ?? 0) }, sent: 0, state: 'spooling', at: Date.now() }
+  const rel = url.searchParams.get('rel') ? safeRelPath(url.searchParams.get('rel')) : null
+  const name = rel ? rel.split('/').pop() : safeName(url.searchParams.get('name') || 'dropped-file')
+  const batchId = url.searchParams.get('batch')
+  const batch = batchId ? { id: batchId, name: url.searchParams.get('label') || null, count: Number(url.searchParams.get('count') || 1), size: Number(url.searchParams.get('bytes') || 0) } : null
+  const send = { id: randomUUID(), to: { id: peer.id, name: peer.name }, file: { name, size: Number(req.headers['content-length'] ?? 0), rel }, batch: batchId, sent: 0, state: 'spooling', at: Date.now() }
   sends.set(send.id, send)
 
   let dir
@@ -103,6 +109,8 @@ async function startSend(z, req, res, url) {
     // from here the browser is no longer waiting: the offer goes out, and the person at the other
     // end takes as long as they take
     const out = await z.sendFile(peer, spool, {
+      rel,
+      batch,
       onProgress: ({ sent, size }) => {
         send.state = 'sending'
         send.sent = sent
@@ -134,7 +142,7 @@ export async function handleDrop(url, req, res) {
   }
 
   if (req.method === 'GET' && path === '/api/drop') return json(res, 200, { me: z.me, inbox: z.inbox, port: z.port })
-  if (req.method === 'GET' && path === '/api/drop/state') return json(res, 200, { me: z.me, inbox: z.inbox, port: z.port, peers: z.peers(), offers: z.offers(), sends: outgoing() })
+  if (req.method === 'GET' && path === '/api/drop/state') return json(res, 200, { me: z.me, inbox: z.inbox, port: z.port, peers: z.peers(), offers: z.offers(), batches: z.batches(), sends: outgoing() })
   if (req.method === 'GET' && path === '/api/drop/peers') return json(res, 200, { peers: z.peers() })
   if (req.method === 'POST' && path === '/api/drop/peers/refresh') {
     z.refresh()
@@ -146,6 +154,12 @@ export async function handleDrop(url, req, res) {
     const decided = z.decide(path.slice('/api/drop/offers/'.length), accept === true)
     if (!decided) return json(res, 409, { error: 'that offer is no longer waiting for an answer' })
     return json(res, 200, { offer: decided })
+  }
+  if (req.method === 'POST' && path.startsWith('/api/drop/batches/')) {
+    const { accept } = await readJson(req)
+    const decided = z.decideBatch(path.slice('/api/drop/batches/'.length), accept === true)
+    if (!decided) return json(res, 409, { error: 'that drop is no longer waiting for an answer' })
+    return json(res, 200, { batch: decided })
   }
   if (req.method === 'POST' && path === '/api/drop/send') return startSend(z, req, res, url)
   if (req.method === 'POST' && path === '/api/drop/reveal') {

@@ -100,6 +100,23 @@ describe('the drop zone behind the panel', () => {
     expect(readdirSync(theirInbox)).toEqual(['notes.md'])
   })
 
+  it('sends a whole folder as one question, answered once', async () => {
+    const batch = new URLSearchParams({ to: 'them', batch: 'deck-1', label: 'deck', count: '2', bytes: '13' })
+    await Promise.all([
+      get(`/api/drop/send?${batch}&rel=${encodeURIComponent('deck/slides.md')}`, { method: 'POST', body: 'hello' }),
+      get(`/api/drop/send?${batch}&rel=${encodeURIComponent('deck/notes/read.md')}`, { method: 'POST', body: 'good day' }),
+    ])
+    // two files, one question at the far end, and nothing on their disk until it is answered
+    const shape = await waitFor(() => them.batches().find((b) => b.id === 'deck-1' && b.files === 2))
+    expect(shape).toMatchObject({ name: 'deck', count: 2, size: 13, answered: null })
+    expect(existsSync(join(theirInbox, 'deck'))).toBe(false)
+
+    them.decideBatch('deck-1', true)
+    await waitFor(async () => (await get('/api/drop/state')).body.sends.filter((s) => s.state === 'done').length >= 3)
+    expect(readdirSync(join(theirInbox, 'deck')).sort()).toEqual(['notes', 'slides.md'])
+    expect(readFileSync(join(theirInbox, 'deck', 'notes', 'read.md'), 'utf8')).toBe('good day')
+  })
+
   it('accepts an offer of its own through the route the panel presses', async () => {
     const theirs = them.sendFile({ id: 'mine', name: 'this-mac', host: '127.0.0.1', port: dropZone().port }, join(theirInbox, 'notes.md'), { poll: 20 })
     const waiting = await waitFor(async () => (await get('/api/drop/state')).body.offers.find((o) => o.state === 'pending'))
@@ -112,5 +129,23 @@ describe('the drop zone behind the panel', () => {
 
     // and the same offer cannot be answered twice
     expect((await get(`/api/drop/offers/${waiting.id}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"accept":true}' })).status).toBe(409)
+  })
+
+  it('answers a whole incoming folder with one press, the way the panel does', async () => {
+    const mine = { id: 'mine', name: 'this-mac', host: '127.0.0.1', port: dropZone().port }
+    const batch = { id: 'in-1', name: 'deck', count: 2, size: 13 }
+    const both = Promise.all([
+      them.sendFile(mine, join(theirInbox, 'deck', 'slides.md'), { poll: 20, rel: 'deck/slides.md', batch }),
+      them.sendFile(mine, join(theirInbox, 'deck', 'notes', 'read.md'), { poll: 20, rel: 'deck/notes/read.md', batch }),
+    ])
+    const shown = await waitFor(async () => (await get('/api/drop/state')).body.batches.find((b) => b.id === 'in-1' && b.files === 2))
+    expect(shown).toMatchObject({ name: 'deck', count: 2, size: 13, answered: null })
+    expect(existsSync(join(dir, 'mine', 'deck'))).toBe(false)
+
+    const { body } = await get('/api/drop/batches/in-1', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"accept":true}' })
+    expect(body.batch).toMatchObject({ answered: true })
+    await both
+    expect(readdirSync(join(dir, 'mine', 'deck')).sort()).toEqual(['notes', 'slides.md'])
+    expect((await get('/api/drop/batches/in-1', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"accept":true}' })).status).toBe(409)
   })
 })

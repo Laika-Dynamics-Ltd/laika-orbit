@@ -23,9 +23,13 @@
  * (server.mjs, :5200) stays on loopback where it belongs: it reads indexed personal files and has
  * no login, so it must never be the thing that hears the network.
  *
- *   startDrop()          → the service: peers(), offers(), decide(), sendFile(), close()
+ * Many files, or a folder, are one *batch*: one question, answered once, with the number of files
+ * and the number of bytes fixed before it is asked — so a yes to "4 files · 8 MB" cannot be turned
+ * into four thousand by the sender.
+ *
+ *   startDrop()          → peers(), offers(), batches(), decide(), decideBatch(), sendFile(), close()
  *   GET  /drop/hello                 who this Orbit is, for a peer to check it is really here
- *   POST /drop/offer                 { from, file } → an offer id; writes nothing
+ *   POST /drop/offer                 { from, file, batch? } → an offer id; writes nothing
  *   GET  /drop/offer/<id>            the sender waits here: pending | accepted+ticket | declined
  *   PUT  /drop/file/<ticket>         the bytes, once, into the inbox
  */
@@ -35,7 +39,7 @@ import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSyn
 import { rename, rm, stat } from 'node:fs/promises'
 import { createServer, request as httpRequest } from 'node:http'
 import { homedir, hostname } from 'node:os'
-import { basename, extname, join } from 'node:path'
+import { basename, dirname, extname, join } from 'node:path'
 import { Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 
@@ -50,6 +54,8 @@ const TICKET_TTL_MS = 60_000
 /** a hostile peer on the LAN should not be able to fill the disk or the offer list */
 const MAX_BYTES = 16 * 1024 ** 3
 const MAX_PENDING = 24
+/** a folder drop is many offers under one answer; this is the most files one answer can cover */
+const MAX_BATCH = 2000
 
 /** this Orbit, as the network sees it: a name a person recognises and an id that never collides */
 export function identity(file = join(homedir(), '.laika', 'drop.json')) {
@@ -104,6 +110,21 @@ export function safeName(name) {
   return (bare || 'dropped-file').slice(0, 120)
 }
 
+/**
+ * The same for a path inside a dropped folder: every segment is sanitised, "." and ".." are
+ * dropped rather than resolved, and the depth is capped — so "photos/holiday/../../../etc/hosts"
+ * becomes "photos/holiday/etc/hosts", which is inside the inbox where it belongs.
+ */
+export function safeRelPath(rel) {
+  const parts = String(rel ?? '')
+    .split(/[\\/]+/)
+    .map((p) => p.trim())
+    .filter((p) => p && p !== '.' && p !== '..')
+    .map(safeName)
+    .slice(0, 12)
+  return parts.length ? parts.join('/') : 'dropped-file'
+}
+
 /** the first free name at this path: "notes.md", then "notes (2).md", and so on — never an overwrite */
 export function uniquePath(path, exists = existsSync) {
   if (!exists(path)) return path
@@ -152,8 +173,10 @@ async function readJson(req, limit = 64 * 1024) {
  * address than be discoverable); the server and the offer flow are unchanged by it.
  */
 export async function startDrop({ port = DROP_PORT, inbox = INBOX, announce = true, me = identity(), onOffer = () => {}, host = '0.0.0.0' } = {}) {
-  /** offer id → { id, from, file, state, at, ticket, saved, error } — in memory only, by design */
+  /** offer id → { id, from, file, batch, state, at, ticket, saved, error } — in memory, by design */
   const offers = new Map()
+  /** batch id → the shape of a many-file drop, and the one answer that covers it */
+  const batches = new Map()
   const seen = new Map()
   let bonjour = null
   let advert = null
@@ -169,8 +192,48 @@ export async function startDrop({ port = DROP_PORT, inbox = INBOX, announce = tr
       }
       if (!['pending', 'accepted', 'receiving'].includes(o.state) && now - o.at > 30 * 60_000) offers.delete(o.id)
     }
+    for (const b of batches.values()) if (now - b.at > 30 * 60_000 && ![...offers.values()].some((o) => o.batch === b.id)) batches.delete(b.id)
   }
   const byTicket = (t) => (t ? [...offers.values()].find((o) => o.ticket === t) : null)
+
+  /**
+   * Where a file lands. A loose file goes in the inbox under a free name; a file from a dropped
+   * folder keeps the shape it was dragged in with, under one top folder chosen once for the whole
+   * batch — so a second copy of "photos" arrives as "photos (2)" rather than being mixed in.
+   */
+  const placeFor = (offer) => {
+    const rel = offer.file.rel
+    if (!rel?.includes('/')) return uniquePath(join(inbox, offer.file.name))
+    const [top, ...rest] = rel.split('/')
+    const b = offer.batch ? batches.get(offer.batch) : null
+    const root = b?.root ?? basename(uniquePath(join(inbox, top)))
+    if (b) b.root = root
+    const target = join(inbox, root, ...rest)
+    mkdirSync(dirname(target), { recursive: true })
+    return uniquePath(target)
+  }
+
+  /**
+   * Many files are one question. The sender declares the shape of the drop up front — how many
+   * files, how many bytes — and that declaration is both what the panel shows and what this side
+   * holds them to: a batch can never grow past the count and size that were answered, so a yes to
+   * "4 files · 8 MB" cannot turn into four thousand. Later files in an answered batch are not
+   * asked about again, because the answer was given for the drop and not for one file of it.
+   */
+  const openBatch = (decl, from, size) => {
+    const id = String(decl?.id ?? '').slice(0, 64)
+    const count = Number(decl?.count)
+    const total = Number(decl?.size)
+    if (!id || !Number.isInteger(count) || count < 1 || count > MAX_BATCH || !Number.isFinite(total) || total < 0 || total > MAX_BYTES) return { error: 'that is not a batch this drop zone takes', status: 400 }
+    let b = batches.get(id)
+    if (!b) batches.set(id, (b = { id, from: from.id, name: String(decl?.name ?? '').slice(0, 120) || null, count, size: total, files: 0, bytes: 0, answered: null, root: null, at: Date.now() }))
+    if (b.from !== from.id) return { error: 'that batch belongs to someone else', status: 403 }
+    if (b.files + 1 > b.count || b.bytes + size > b.size) return { error: 'that batch is already full', status: 409 }
+    b.files++
+    b.bytes += size
+    b.at = Date.now()
+    return b
+  }
 
   const server = createServer(async (req, res) => {
     // rule 2, at the front door: this port answers the local link and nothing else
@@ -191,13 +254,28 @@ export async function startDrop({ port = DROP_PORT, inbox = INBOX, announce = tr
       const size = Number(body?.file?.size)
       if (!body?.file?.name || !Number.isFinite(size) || size < 0) return json(res, 400, { error: 'an offer needs a file name and a size' })
       if (size > MAX_BYTES) return json(res, 413, { error: 'that file is larger than the drop zone accepts' })
+      const from = { id: String(body?.from?.id ?? '').slice(0, 64), name: String(body?.from?.name ?? 'someone').slice(0, 64), address: req.socket.remoteAddress }
       if ([...offers.values()].filter((o) => o.state === 'pending').length >= MAX_PENDING) return json(res, 429, { error: 'too many offers are already waiting' })
+      const rel = body?.file?.rel ? safeRelPath(body.file.rel) : null
+      const batch = body?.batch ? openBatch(body.batch, from, size) : null
+      if (batch?.error) return json(res, batch.status, { error: batch.error })
       const offer = {
         id: randomUUID(),
-        from: { id: String(body?.from?.id ?? '').slice(0, 64), name: String(body?.from?.name ?? 'someone').slice(0, 64), address: req.socket.remoteAddress },
-        file: { name: safeName(body.file.name), size },
+        from,
+        file: { name: rel ? rel.split('/').pop() : safeName(body.file.name), size, rel },
+        batch: batch?.id ?? null,
         state: 'pending',
         at: Date.now(),
+      }
+      // a batch this person has already said yes to is not asked again: they answered for the
+      // whole drop, and a batch can never grow past the count and size they were shown
+      if (batch?.answered === true) {
+        offer.state = 'accepted'
+        offer.decidedAt = Date.now()
+        offer.ticket = randomBytes(24).toString('hex')
+      } else if (batch?.answered === false) {
+        offer.state = 'declined'
+        offer.decidedAt = Date.now()
       }
       offers.set(offer.id, offer)
       try {
@@ -222,7 +300,7 @@ export async function startDrop({ port = DROP_PORT, inbox = INBOX, announce = tr
       offer.state = 'receiving'
       offer.received = 0
       mkdirSync(inbox, { recursive: true })
-      const target = uniquePath(join(inbox, offer.file.name))
+      const target = placeFor(offer)
       const part = `${target}.part`
       const limit = new Transform({
         transform(chunk, _enc, cb) {
@@ -267,6 +345,13 @@ export async function startDrop({ port = DROP_PORT, inbox = INBOX, announce = tr
     })
   }
 
+  /** an offer's answer, and the ticket that a yes mints */
+  function answer(o, accept) {
+    o.state = accept ? 'accepted' : 'declined'
+    o.decidedAt = Date.now()
+    if (accept) o.ticket = randomBytes(24).toString('hex')
+  }
+
   return {
     me,
     port: bound,
@@ -300,10 +385,27 @@ export async function startDrop({ port = DROP_PORT, inbox = INBOX, announce = tr
       prune()
       const o = offers.get(id)
       if (!o || o.state !== 'pending') return null
-      o.state = accept ? 'accepted' : 'declined'
-      o.decidedAt = Date.now()
-      if (accept) o.ticket = randomBytes(24).toString('hex')
+      answer(o, accept)
       return { ...o, ticket: undefined }
+    },
+    /**
+     * The answer for a whole drop: every file already offered under this batch, and every one
+     * still to come. One question, one yes — which is why the batch's count and size are fixed
+     * before it is asked.
+     */
+    decideBatch: (id, accept) => {
+      prune()
+      const b = batches.get(id)
+      if (!b || b.answered !== null) return null
+      b.answered = Boolean(accept)
+      const answered = [...offers.values()].filter((o) => o.batch === id && o.state === 'pending')
+      for (const o of answered) answer(o, accept)
+      return { ...b, answered: b.answered, decided: answered.length }
+    },
+    /** the shape of each many-file drop, for the panel to show as one row */
+    batches: () => {
+      prune()
+      return [...batches.values()].map(({ root, ...b }) => b)
     },
     sendFile: (peer, path, opts) => sendFile(peer, path, { ...opts, from: me }),
     close: async () => {
@@ -320,8 +422,12 @@ export async function startDrop({ port = DROP_PORT, inbox = INBOX, announce = tr
  *
  * The wait is the point — it resolves 'declined' as readily as 'accepted', and neither answer is
  * assumed. `onProgress({ sent, size })` is called as the bytes go.
+ *
+ * `rel` is the file's path inside a dropped folder, and `batch` is { id, name, count, size }: the
+ * shape of the whole drop, declared on every file of it so the far end can hold the sender to what
+ * was answered. The second and later files of an answered batch are not asked about again.
  */
-export async function sendFile(peer, path, { from = identity(), onProgress = () => {}, poll = 500, timeout = OFFER_TTL_MS, signal } = {}) {
+export async function sendFile(peer, path, { from = identity(), onProgress = () => {}, poll = 500, timeout = OFFER_TTL_MS, signal, rel = null, batch = null } = {}) {
   if (!isLocalAddress(peer?.host)) throw new Error(`${peer?.host ?? 'that peer'} is not on the local network`)
   const info = await stat(path)
   if (!info.isFile()) throw new Error('only a file can be dropped')
@@ -332,11 +438,11 @@ export async function sendFile(peer, path, { from = identity(), onProgress = () 
     if (!r.ok) throw new Error(body.error || `${peer.name ?? peer.host} answered ${r.status}`)
     return body
   }
-  const file = { name: basename(path), size: info.size }
+  const file = { name: basename(path), size: info.size, rel }
   const { offer } = await ask('/drop/offer', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ from: { id: from.id, name: from.name }, file }),
+    body: JSON.stringify({ from: { id: from.id, name: from.name }, file, batch }),
   })
 
   const until = Date.now() + timeout
