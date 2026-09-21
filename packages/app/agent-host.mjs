@@ -34,7 +34,7 @@ import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, re
 import { open as openFile } from 'node:fs/promises'
 import { execFile, execFileSync } from 'node:child_process'
 import { createServer } from 'node:http'
-import { bindAddress, refuseRequest } from './local-net.mjs'
+import { bindAddress, lanAddress, rebind, refuseRequest } from './local-net.mjs'
 import { homedir, hostname, tmpdir } from 'node:os'
 import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
@@ -1489,9 +1489,13 @@ async function machine() {
   return { hostname: hostname(), platform: process.platform, arch: process.arch, ...load, gpus: gpu, unity: unityVersions(), jobs: liveJobs().length, work: WORK_ROOT, cap: jobs.cap, memFree: Number.isFinite(memAvailable()) ? memAvailable() : null }
 }
 
-/** off unless asked for: the fleet is not put on a network by an update */
-const BIND = bindAddress()
-const LAN = BIND !== '127.0.0.1'
+/**
+ * Off unless asked for: the fleet is not put on a network by an update. AGENT_LAN=1 says so at
+ * launch; POST /lan says so later, from the pairing panel, and is how it is taken back — both are
+ * a deliberate act, which is what opt-in means. It is not a constant because of the second one.
+ */
+let bind = bindAddress()
+const onLan = () => bind !== '127.0.0.1'
 
 const server = createServer(async (req, res) => {
   const json = (code, body) => {
@@ -1504,6 +1508,34 @@ const server = createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x')
   const parts = url.pathname.split('/').filter(Boolean)
   try {
+    /**
+     * Start or stop answering the local network, without restarting: the chats here stay open.
+     * The answer goes out before the move, because the move cuts this very connection.
+     *
+     * Stopping is how a paired phone is revoked in a hurry. It is not the same as a new token —
+     * turning it on again admits the same one — and the panel says so.
+     */
+    if (url.pathname === '/lan' && req.method === 'POST') {
+      const want = (await readBody(req, 1e3))?.on === true ? '0.0.0.0' : '127.0.0.1'
+      const port = server.address().port
+      if (want === bind) return json(200, { lan: onLan(), port, host: onLan() ? lanAddress() : null })
+      json(200, { lan: want !== '127.0.0.1', port, host: want !== '127.0.0.1' ? lanAddress() : null })
+      setImmediate(async () => {
+        const was = bind
+        bind = want
+        try {
+          await rebind(server, { port, bind })
+        } catch (e) {
+          // the port went while it was unbound: back to loopback, which is always safe to hold
+          console.log(`could not move to ${want}: ${e?.message ?? e}`)
+          bind = was === '127.0.0.1' ? was : '127.0.0.1'
+          await rebind(server, { port, bind: '127.0.0.1' }).catch(() => {})
+        }
+        writeState()
+        console.log(`agent host now on ${bind}:${port}`)
+      })
+      return
+    }
     if (url.pathname === '/health') return json(200, { ok: true, pid: process.pid, build: BUILD, sessions: [...sessions.values()].filter((x) => x.state !== 'closed').length + [...terms.values()].filter((t) => t.exited === null).length, machine: url.searchParams.has('machine') ? await machine() : undefined })
     const shownAccounts = () => accounts().map((a) => ({ ...a, configDir: a.configDir.replace(homedir(), '~') }))
     if (url.pathname === '/accounts' && req.method === 'GET') {
@@ -1968,14 +2000,14 @@ const server = createServer(async (req, res) => {
 
 const writeState = () => {
   const { port } = server.address()
-  writeFileSync(STATE, JSON.stringify({ port, token: TOKEN, pid: process.pid }), { mode: 0o600 })
+  writeFileSync(STATE, JSON.stringify({ port, token: TOKEN, pid: process.pid, lan: onLan(), host: onLan() ? lanAddress() : null }), { mode: 0o600 })
   chmodSync(STATE, 0o600)
   return port
 }
-server.listen(Number(process.env.AGENT_PORT) || 0, BIND, () => {
+server.listen(Number(process.env.AGENT_PORT) || 0, bind, () => {
   const port = writeState()
-  console.log(`agent host on ${BIND}:${port} for app :${APP_PORT}`)
-  if (LAN) console.log(`  on the local network (AGENT_LAN=1): this machine's fleet can be driven from another machine on this link, with the token and from a private address only`)
+  console.log(`agent host on ${bind}:${port} for app :${APP_PORT}`)
+  if (onLan()) console.log(`  on the local network (AGENT_LAN=1): this machine's fleet can be driven from another machine on this link, with the token and from a private address only`)
   // bring back the chats a previous host had open
   restoreSessions()
     .catch((e) => {

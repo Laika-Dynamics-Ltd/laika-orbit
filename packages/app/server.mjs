@@ -21,6 +21,7 @@ import { handleSupabase } from './supabase.mjs'
 import { handleLicense } from './license.mjs'
 import { handleVoice } from './voice.mjs'
 import { handleDrop, startDropZone } from './drop-api.mjs'
+import { handlePair } from './pair-api.mjs'
 import { readdir, readFile as fsRead, writeFile, mkdir, stat, realpath, rename, rm } from 'node:fs/promises'
 import { execFile, execFileSync } from 'node:child_process'
 import { promisify } from 'node:util'
@@ -804,6 +805,8 @@ createHttp(async (req, res) => {
     if (await handleVoice(url, req, res)) return
     // the drop zone: peers on the LAN, and the yes that lets one send a file here (see drop.mjs)
     if (await handleDrop(url, req, res)) return
+    // pairing a phone with the agent host: the QR, and the LAN switch (see pair-api.mjs)
+    if (await handlePair(url, req, res)) return
     // Supabase: each account's projects, their schemas and the SQL console (see supabase.mjs)
     if (await handleSupabase(url, req, res)) return
     if (url.pathname === '/api/version') {

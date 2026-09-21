@@ -1,0 +1,24 @@
+/* Pairing a phone with the agent host (pair-panel.ts). */
+.pr { display: flex; flex-direction: column; gap: 14px; padding: 14px; font: 12px/1.45 ui-sans-serif, -apple-system, system-ui, sans-serif; color: var(--n30); overflow-y: auto }
+.pr-line { display: flex; align-items: center; gap: 7px; margin: 0; color: var(--n30) }
+.pr-line i { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--n18) }
+.pr-line.on i { background: var(--ok) }
+.pr-line b { font: 600 11.5px/1.45 ui-monospace, Menlo, monospace; color: var(--n37) }
+.pr-sub { margin: 5px 0 0; font-size: 11px; color: var(--n24) }
+.pr-off { margin: 0; font-size: 11.5px; color: var(--n24) }
+.pr-bad { margin: 7px 0 0; font-size: 11px; color: var(--err) }
+
+.pr-code:empty { display: none }
+/* a QR is an optical target, not chrome: it needs light behind dark whatever the theme is, so
+   this one background is deliberately not a ramp token */
+.pr-qr { display: grid; place-items: center; padding: 14px; border: 1px solid var(--n13); border-radius: 12px; background: white }
+.pr-qr svg { display: block; width: 100%; max-width: 232px; height: auto; shape-rendering: crispedges }
+.pr-warn { margin: 10px 0 0; padding: 9px 10px; border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent); border-radius: 8px; background: color-mix(in srgb, var(--warn) 9%, transparent); font-size: 11px; color: var(--n30) }
+.pr-warn b { color: var(--warn) }
+
+.pr-act { display: flex; flex-wrap: wrap; gap: 8px }
+.pr-btn { padding: 5px 11px; border: 1px solid var(--n13); border-radius: 7px; background: none; font: 500 11.5px/1.45 inherit; color: var(--n30); cursor: pointer }
+.pr-btn:hover:not([disabled]) { border-color: var(--n18); color: var(--n37) }
+.pr-btn.go { border-color: color-mix(in srgb, var(--acc) 45%, transparent); color: var(--acc) }
+.pr-btn.go:hover:not([disabled]) { background: color-mix(in srgb, var(--acc) 13%, transparent) }
+.pr-btn[disabled] { opacity: 0.5; cursor: default }
