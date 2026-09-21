@@ -275,9 +275,21 @@ export async function startDrop({ port = DROP_PORT, inbox = INBOX, announce = tr
     peers: () => [...seen.values()].sort((a, b) => b.at - a.at),
     /** ask the network again rather than waiting for the next announcement */
     refresh: () => browser?.update(),
+    /**
+     * Put a peer in the list by hand rather than by advertisement — a network that filters
+     * multicast still has the two machines on it, and the address is checked the same way a
+     * discovered one is.
+     */
+    add: (p) => {
+      if (!p?.id || !p?.port || !isLocalAddress(p.host) || p.id === me.id) return null
+      const peer = { id: p.id, name: p.name || p.host, host: p.host, port: Number(p.port), addresses: [p.host], manual: true, at: Date.now() }
+      seen.set(peer.id, peer)
+      return peer
+    },
     offers: () => {
       prune()
-      return [...offers.values()].map(({ ticket, ...o }) => o)
+      // the ticket never leaves this module, and `saved` is the name it went under, not the path
+      return [...offers.values()].map(({ ticket, saved, ...o }) => (saved ? { ...o, saved: basename(saved) } : o))
     },
     /**
      * The whole of rule 1: until this is called with true, the sender has been told "pending" and

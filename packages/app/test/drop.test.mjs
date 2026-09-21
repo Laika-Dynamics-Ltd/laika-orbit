@@ -78,7 +78,7 @@ describe('offer, answer, transfer', () => {
     expect(await sent).toMatchObject({ ok: true, saved: 'notes.md' })
     expect(readFileSync(join(inbox, 'notes.md'), 'utf8')).toBe('the file that crossed the room\n')
     expect(seen.at(-1)).toEqual({ sent: 31, size: 31 })
-    expect(them.offers().find((o) => o.id === asked[1].id)).toMatchObject({ state: 'done' })
+    expect(them.offers().find((o) => o.id === asked[1].id)).toMatchObject({ state: 'done', saved: 'notes.md' })
   })
 
   it('takes a second file of the same name beside the first', async () => {
