@@ -19,6 +19,8 @@ research/frames/
 # local runtime
 *.log
 .DS_Store
+# runtime state the app writes beside a checkout; nothing here belongs to the repo
+.laika/
 
 # generated synthetic fixture — rebuild with `node packages/graph/scripts/gen-data.mjs`
 packages/graph/public/brain.json
