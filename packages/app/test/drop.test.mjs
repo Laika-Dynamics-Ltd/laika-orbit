@@ -3,14 +3,15 @@ import { request as httpRequest } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { isLocalAddress, peerFrom, safeName, safeRelPath, sendFile, startDrop, uniquePath } from '../drop.mjs'
+import { isLocalAddress } from '../local-net.mjs'
+import { peerFrom, safeName, safeRelPath, sendFile, startDrop, uniquePath } from '../drop.mjs'
 
 describe('what may reach the drop zone', () => {
+  // the address check itself is local-net.mjs's, and is tested there; this is that the drop zone
+  // is the thing using it
   it('takes the local link and nothing else', () => {
-    for (const a of ['192.168.1.20', '10.0.0.4', '172.16.9.1', '172.31.255.254', '169.254.3.3', '127.0.0.1', '::1', '::ffff:192.168.1.20', 'fe80::1c2b%en0', 'fd12:3456::1'])
-      expect(isLocalAddress(a), a).toBe(true)
-    for (const a of ['8.8.8.8', '172.32.0.1', '172.15.0.1', '203.0.113.7', '2606:4700::1111', '999.1.1.1', '', null])
-      expect(isLocalAddress(a), String(a)).toBe(false)
+    expect(isLocalAddress('192.168.1.20')).toBe(true)
+    expect(isLocalAddress('203.0.113.7')).toBe(false)
   })
 
   it('keeps a sender from naming a path', () => {

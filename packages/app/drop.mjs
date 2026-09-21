@@ -10,6 +10,7 @@
  *      ticket, and only a request carrying that ticket may put bytes anywhere. A declined,
  *      unanswered or expired offer leaves no trace at all.
  *   2. It stays on the local network. The receiving socket answers private addresses only
+ *      (isLocalAddress, local-net.mjs — the same check the agent host puts in front of its own)
  *      (RFC1918, link-local, unique-local, loopback) and a peer is only sent to at one of those,
  *      so there is nothing to relay through and nothing an outside host can reach even if the
  *      port were forwarded by accident. Discovery is multicast DNS, which does not leave the link.
@@ -38,6 +39,7 @@
  *   PUT  /drop/file/<ticket>         the bytes, once, into the inbox
  */
 import { Bonjour } from 'bonjour-service'
+import { isLocalAddress } from './local-net.mjs'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, rmdirSync, statSync, writeFileSync } from 'node:fs'
 import { rename, rm, stat } from 'node:fs/promises'
@@ -73,27 +75,6 @@ export function identity(file = join(homedir(), '.laika', 'drop.json')) {
     writeFileSync(file, `${JSON.stringify(me, null, 2)}\n`, { mode: 0o600 })
   } catch {}
   return me
-}
-
-/**
- * Is this address on the local link? Private IPv4 (10/8, 172.16/12, 192.168/16), link-local
- * (169.254/16, fe80::/10), unique-local IPv6 (fc00::/7) and loopback — nothing else, so a request
- * that reached this port from the internet is refused before it can even open an offer.
- */
-export function isLocalAddress(addr) {
-  if (!addr) return false
-  let a = String(addr).trim().toLowerCase()
-  if (a.startsWith('::ffff:')) a = a.slice(7)
-  const zone = a.indexOf('%')
-  if (zone > 0) a = a.slice(0, zone)
-  if (a === '::1' || a === 'localhost') return true
-  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(a)
-  if (v4) {
-    if (v4.slice(1).some((n) => Number(n) > 255)) return false
-    const [x, y] = [Number(v4[1]), Number(v4[2])]
-    return x === 10 || x === 127 || (x === 172 && y >= 16 && y <= 31) || (x === 192 && y === 168) || (x === 169 && y === 254)
-  }
-  return /^f[cd][0-9a-f]{0,2}[:0-9a-f]/.test(a) || /^fe[89ab][0-9a-f]?[:0-9a-f]/.test(a)
 }
 
 /**
