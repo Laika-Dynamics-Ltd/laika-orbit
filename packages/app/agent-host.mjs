@@ -19,14 +19,22 @@
  *
  * Installed on another machine (packages/node-bundle), it runs as a service on a fixed loopback
  * port with a token kept on disk, both set by the installer, and the Mac reaches it through SSH:
- *   AGENT_PORT        port to listen on (127.0.0.1 only; 0 or unset picks a free one)
+ *   AGENT_PORT        port to listen on (0 or unset picks a free one)
  *   AGENT_TOKEN_FILE  file holding the token (otherwise a new one each launch)
+ *   AGENT_LAN=1       answer the local network as well as loopback, for the iOS app
+ *
+ * AGENT_LAN is off unless it is asked for, and it is the only way this process is reachable from
+ * another machine without an SSH tunnel: updating must never be what puts a fleet on a café wifi.
+ * With it on, every request passes refuseRequest (local-net.mjs) before anything else — the
+ * address first, so something off the link cannot so much as time a guess at the token, then the
+ * token, which is what it always was.
  */
-import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { open as openFile } from 'node:fs/promises'
 import { execFile, execFileSync } from 'node:child_process'
 import { createServer } from 'node:http'
+import { bindAddress, refuseRequest } from './local-net.mjs'
 import { homedir, hostname, tmpdir } from 'node:os'
 import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
@@ -1481,18 +1489,18 @@ async function machine() {
   return { hostname: hostname(), platform: process.platform, arch: process.arch, ...load, gpus: gpu, unity: unityVersions(), jobs: liveJobs().length, work: WORK_ROOT, cap: jobs.cap, memFree: Number.isFinite(memAvailable()) ? memAvailable() : null }
 }
 
-const authed = (req) => {
-  const got = Buffer.from(String(req.headers['x-agent-token'] ?? ''))
-  const want = Buffer.from(TOKEN)
-  return got.length === want.length && timingSafeEqual(got, want)
-}
+/** off unless asked for: the fleet is not put on a network by an update */
+const BIND = bindAddress()
+const LAN = BIND !== '127.0.0.1'
 
 const server = createServer(async (req, res) => {
   const json = (code, body) => {
     res.writeHead(code, { 'content-type': 'application/json', 'cache-control': 'no-store' })
     res.end(JSON.stringify(body))
   }
-  if (!authed(req)) return json(401, { error: 'unauthorised' })
+  // the front door, in this order: on the link, then holding this launch's token
+  const refused = refuseRequest(req, TOKEN)
+  if (refused) return json(refused.code, refused.body)
   const url = new URL(req.url, 'http://x')
   const parts = url.pathname.split('/').filter(Boolean)
   try {
@@ -1964,8 +1972,10 @@ const writeState = () => {
   chmodSync(STATE, 0o600)
   return port
 }
-server.listen(Number(process.env.AGENT_PORT) || 0, '127.0.0.1', () => {
-  console.log(`agent host on 127.0.0.1:${writeState()} for app :${APP_PORT}`)
+server.listen(Number(process.env.AGENT_PORT) || 0, BIND, () => {
+  const port = writeState()
+  console.log(`agent host on ${BIND}:${port} for app :${APP_PORT}`)
+  if (LAN) console.log(`  on the local network (AGENT_LAN=1): this machine's fleet can be driven from another machine on this link, with the token and from a private address only`)
   // bring back the chats a previous host had open
   restoreSessions()
     .catch((e) => {
