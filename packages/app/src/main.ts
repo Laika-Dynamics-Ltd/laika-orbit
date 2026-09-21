@@ -29,6 +29,7 @@ import { closeShowreel, isShowreelOpen, openShowreel } from './showreel.ts'
 import './sysres.ts'
 import './offload.ts'
 import './drop-panel.ts'
+import './pair-panel.ts'
 import * as activity from './activity.ts'
 import {
   closeTopPanel,

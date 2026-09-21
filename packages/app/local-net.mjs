@@ -12,6 +12,7 @@
  * this network holding this launch's secret.
  */
 import { timingSafeEqual } from 'node:crypto'
+import { networkInterfaces } from 'node:os'
 
 /**
  * Is this address on the local link? Private IPv4 (10/8, 172.16/12, 192.168/16), link-local
@@ -57,4 +58,32 @@ export function refuseRequest(req, token) {
   if (!isLocalAddress(req?.socket?.remoteAddress)) return { code: 403, body: { error: 'this port answers the local network only' } }
   if (!tokenOk(req?.headers?.['x-agent-token'], token)) return { code: 401, body: { error: 'unauthorised' } }
   return null
+}
+
+/** this machine's address on the link, for a phone to be pointed at; null when there is no network */
+export const lanAddress = (nets = networkInterfaces()) =>
+  Object.values(nets)
+    .flat()
+    .find((n) => n && n.family === 'IPv4' && !n.internal && isLocalAddress(n.address))?.address ?? null
+
+/**
+ * Move a listening server from one address to another without restarting the process — how the
+ * agent host starts and stops answering the network while its chats stay open and running.
+ *
+ * Open connections are cut rather than waited for: one of them is the request that asked for this,
+ * and the others are exactly what a stop is meant to end. The port is kept, so a phone that was
+ * paired before a stop finds the same address afterwards.
+ */
+export async function rebind(server, { port, bind }) {
+  server.closeAllConnections?.()
+  await new Promise((ok, fail) => server.close((e) => (e ? fail(e) : ok())))
+  await new Promise((ok, fail) => {
+    const failed = (e) => fail(e)
+    server.once('error', failed)
+    server.listen(port, bind, () => {
+      server.off('error', failed)
+      ok()
+    })
+  })
+  return server.address()
 }
