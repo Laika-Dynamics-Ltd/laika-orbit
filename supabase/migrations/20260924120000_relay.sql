@@ -311,7 +311,11 @@ begin
 end;
 $$;
 
-revoke all on function public.relay_sweep_tick() from public, anon, authenticated;
+-- This one is deliberately left executable, unlike the sweep it calls. A trigger function is fired
+-- by the insert, not called by the inserter, and it is not worth betting the whole write path on
+-- which of those Postgres checks a privilege for. Nothing is given away by that: called directly
+-- it raises "trigger functions can only be called as triggers", and the reach it has when it does
+-- fire comes from being security definer, which is already the case.
 
 drop trigger if exists relay_message_sweep on public.relay_message;
 create trigger relay_message_sweep

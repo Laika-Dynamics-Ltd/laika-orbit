@@ -45,8 +45,12 @@ insert into public.relay_message (room, owner, dir, seq, nonce, ct) values
 -- test can ask for that row directly rather than only counting what came back. A setting rather
 -- than a temp table: a temp table belongs to the role that made it, and half of this file runs as
 -- somebody else.
-select set_config('test.bobs_message',
-  (select id::text from public.relay_message where room = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'), true);
+do $$
+begin
+  perform set_config('test.bobs_message',
+    (select id::text from public.relay_message where room = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'), true);
+end;
+$$;
 
 
 -- ------------------------------------------------------------ what the shape of a row is ----
@@ -162,31 +166,33 @@ select throws_ok(
   null,
   'nobody edits a sealed message in place, not even its author');
 
-select is(
-  (with gone as (delete from public.relay_message where room = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' returning 1)
-   select count(*) from gone)::int,
-  0,
+-- the WITH has to be the top level of the statement, not a scalar subquery inside one: a
+-- data-modifying CTE is only allowed where Postgres can see it as the statement itself
+
+with gone as (delete from public.relay_message where room = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' returning 1)
+select is((select count(*) from gone)::int, 0,
   'alice deleting Bob''s messages deletes nothing');
 
-select is(
-  (with gone as (delete from public.relay_message where nonce = 'GGGGGGGGGGGGGGGG' returning 1)
-   select count(*) from gone)::int,
-  1,
+with gone as (delete from public.relay_message where nonce = 'GGGGGGGGGGGGGGGG' returning 1)
+select is((select count(*) from gone)::int, 1,
   'alice deleting her own message — delete-on-read, if an adapter ever wants it');
 
-select is(
-  (with touched as (update public.relay_room set last_seen_at = now()
-                    where id = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' returning 1)
-   select count(*) from touched)::int,
-  0,
+with touched as (update public.relay_room set last_seen_at = now()
+                 where id = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' returning 1)
+select is((select count(*) from touched)::int, 0,
   'alice cannot keep Bob''s room alive, or reach it at all');
 
-select is(
-  (with touched as (update public.relay_room set last_seen_at = now()
-                    where id = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' returning 1)
-   select count(*) from touched)::int,
-  1,
+with touched as (update public.relay_room set last_seen_at = now()
+                 where id = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' returning 1)
+select is((select count(*) from touched)::int, 1,
   'she can say her own Mac is still there, which is the heartbeat the 24-hour sweep reads');
+
+-- the other half of that: the heartbeat is a fact about when it happened, not a value she sets
+update public.relay_room set last_seen_at = now() - interval '25 hours'
+  where id = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+select ok(
+  (select last_seen_at from public.relay_room where id = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa') > now() - interval '1 minute',
+  'and she cannot backdate it, nor post-date it, because the stamp is taken here');
 
 select throws_ok(
   $$ select public.relay_sweep() $$,
@@ -233,11 +239,13 @@ select throws_ok($$ select public.relay_sweep() $$, '42501', null,
 
 reset role;
 
-select is(
-  (select count(*) from information_schema.role_table_grants
-    where grantee = 'anon' and table_schema = 'public' and table_name like 'relay\_%')::int,
-  0,
-  'anon holds no privilege of any kind on either table — checked, not assumed');
+-- asked of the catalogue directly rather than through information_schema, which only shows what the
+-- role running the query is entitled to see
+select ok(
+  not bool_or(has_table_privilege('anon', t, p)),
+  'anon holds no privilege of any kind on either table — checked, not assumed')
+from unnest(array['public.relay_room', 'public.relay_message']) t,
+     unnest(array['select', 'insert', 'update', 'delete', 'truncate', 'references']) p;
 
 select is(
   (select count(*) from pg_policies
@@ -276,11 +284,16 @@ select is(
   (select count(*) from public.relay_message where nonce = 'AAAAAAAAAAAAAAAA')::int, 0,
   'an insert sweeps too, so retention does not depend on pg_cron being installed');
 
--- and a room that stopped saying it was there
+-- And a room that stopped saying it was there. The stamp trigger has to come off to do this: it
+-- refuses to let last_seen_at be anything but now(), which is exactly what the assertion in the
+-- alice section proves a client cannot get around. Here we are simulating a day passing, not a
+-- client lying about one.
+alter table public.relay_room disable trigger relay_room_stamp;
 update public.relay_room set last_seen_at = now() - interval '25 hours' where id = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+alter table public.relay_room enable trigger relay_room_stamp;
 insert into public.relay_message (room, owner, dir, seq, nonce, ct)
 values ('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', '22222222-2222-2222-2222-222222222222', 'p2m', 4, 'JJJJJJJJJJJJJJJJ', 'x');
-select public.relay_sweep();
+do $$ begin perform public.relay_sweep(); end; $$;
 
 select is(
   (select count(*) from public.relay_room where id = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb')::int, 0,
