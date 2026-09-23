@@ -33,8 +33,9 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { open as openFile } from 'node:fs/promises'
 import { execFile, execFileSync } from 'node:child_process'
-import { createServer } from 'node:http'
-import { bindAddress, lanAddress, rebind, refuseRequest } from './local-net.mjs'
+import { lanAddress, refuseRequest } from './local-net.mjs'
+import { createLanTransport } from './lan-transport.mjs'
+import { createSwitchboard } from './transport.mjs'
 import { homedir, hostname, tmpdir } from 'node:os'
 import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
@@ -1492,12 +1493,14 @@ async function machine() {
 /**
  * Off unless asked for: the fleet is not put on a network by an update. AGENT_LAN=1 says so at
  * launch; POST /lan says so later, from the pairing panel, and is how it is taken back — both are
- * a deliberate act, which is what opt-in means. It is not a constant because of the second one.
+ * a deliberate act, which is what opt-in means.
+ *
+ * The socket and the move between addresses live in lan-transport.mjs now, behind the four calls
+ * in transport.mjs, so that a wire which is not a socket at all can answer the same route. What
+ * the host knows is `wires.carry('lan', on)` and a status; what that costs underneath is the
+ * transport's business.
  */
-let bind = bindAddress()
-const onLan = () => bind !== '127.0.0.1'
-
-const server = createServer(async (req, res) => {
+const handler = async (req, res) => {
   const json = (code, body) => {
     res.writeHead(code, { 'content-type': 'application/json', 'cache-control': 'no-store' })
     res.end(JSON.stringify(body))
@@ -1516,23 +1519,15 @@ const server = createServer(async (req, res) => {
      * turning it on again admits the same one — and the panel says so.
      */
     if (url.pathname === '/lan' && req.method === 'POST') {
-      const want = (await readBody(req, 1e3))?.on === true ? '0.0.0.0' : '127.0.0.1'
-      const port = server.address().port
-      if (want === bind) return json(200, { lan: onLan(), port, host: onLan() ? lanAddress() : null })
-      json(200, { lan: want !== '127.0.0.1', port, host: want !== '127.0.0.1' ? lanAddress() : null })
+      const want = (await readBody(req, 1e3))?.on === true
+      const now = wires.statusOf('lan')
+      if (want === now.carrying) return json(200, { lan: now.carrying, port: now.port, host: now.host })
+      json(200, { lan: want, port: now.port, host: want ? lanAddress() : null })
       setImmediate(async () => {
-        const was = bind
-        bind = want
-        try {
-          await rebind(server, { port, bind })
-        } catch (e) {
-          // the port went while it was unbound: back to loopback, which is always safe to hold
-          console.log(`could not move to ${want}: ${e?.message ?? e}`)
-          bind = was === '127.0.0.1' ? was : '127.0.0.1'
-          await rebind(server, { port, bind: '127.0.0.1' }).catch(() => {})
-        }
+        const moved = await wires.carry('lan', want)
+        if (moved.detail) console.log(moved.detail)
         writeState()
-        console.log(`agent host now on ${bind}:${port}`)
+        console.log(`agent host now on ${moved.bind}:${moved.port}`)
       })
       return
     }
@@ -1996,18 +1991,23 @@ const server = createServer(async (req, res) => {
   } catch (e) {
     return json(500, { error: String(e?.message ?? e) })
   }
-})
+}
+
+/** every wire a phone can arrive on. One today; the same four calls when there are two. */
+const lan = createLanTransport({ handler, port: Number(process.env.AGENT_PORT) || 0 })
+const wires = createSwitchboard([lan])
 
 const writeState = () => {
-  const { port } = server.address()
-  writeFileSync(STATE, JSON.stringify({ port, token: TOKEN, pid: process.pid, lan: onLan(), host: onLan() ? lanAddress() : null }), { mode: 0o600 })
+  const { port, carrying, host } = wires.statusOf('lan')
+  writeFileSync(STATE, JSON.stringify({ port, token: TOKEN, pid: process.pid, lan: carrying, host }), { mode: 0o600 })
   chmodSync(STATE, 0o600)
   return port
 }
-server.listen(Number(process.env.AGENT_PORT) || 0, bind, () => {
+wires.open().then(([lanUp]) => {
+  if (lanUp.detail) throw new Error(lanUp.detail)
   const port = writeState()
-  console.log(`agent host on ${bind}:${port} for app :${APP_PORT}`)
-  if (onLan()) console.log(`  on the local network (AGENT_LAN=1): this machine's fleet can be driven from another machine on this link, with the token and from a private address only`)
+  console.log(`agent host on ${lanUp.bind}:${port} for app :${APP_PORT}`)
+  if (lanUp.carrying) console.log(`  on the local network (AGENT_LAN=1): this machine's fleet can be driven from another machine on this link, with the token and from a private address only`)
   // bring back the chats a previous host had open
   restoreSessions()
     .catch((e) => {
