@@ -170,6 +170,50 @@ describe('a stolen anon key gets nothing', () => {
   })
 })
 
+describe('the policy tests are ready to run', () => {
+  // They cannot run here — there is no container runtime on this machine, so no local Postgres.
+  // What can be checked without one is that they would not fall over on their own fixtures, which
+  // is the failure that would otherwise be found only by the person who runs them first.
+  const pg = read('supabase/tests/relay_rls.test.sql')
+
+  it('leaves nothing behind', () => {
+    expect(pg).toMatch(/^begin;/m)
+    expect(pg.trimEnd()).toMatch(/rollback;$/)
+    expect(pg).toContain('select * from finish();')
+  })
+
+  it('uses room ids the table would accept', () => {
+    const check = new RegExp(table('relay_room').match(/check \(id ~ '(.+)'\)/)[1])
+    for (const [lit] of pg.matchAll(/'[0-9a-z]{32}'/g)) expect(lit.slice(1, -1)).toMatch(check)
+  })
+
+  it('uses nonces the table would accept', () => {
+    const check = new RegExp(table('relay_message').match(/check \(nonce ~ '(.+)'\)/)[1])
+    const fixtures = [...pg.matchAll(/'([A-Z])\1{15}'/g)].map((m) => m[0].slice(1, -1))
+    expect(fixtures.length).toBeGreaterThan(4)
+    for (const n of fixtures) expect(n).toMatch(check)
+  })
+
+  it('asks as the wrong account and as anon, not only as nobody', () => {
+    expect(pg).toContain("set local role authenticated")
+    expect(pg).toContain("set local role anon")
+    expect(pg).toMatch(/set local request\.jwt\.claims = '\{"sub": "1{8}-/)
+    expect(pg).toMatch(/set local request\.jwt\.claims = '\{"sub": "2{8}-/)
+  })
+
+  it('has something to say about every policy the migration writes', () => {
+    for (const [, , tbl, verb] of sql.matchAll(/create policy "([^"]+)"\s+on public\.(\w+) for (\w+)/g)) {
+      const claim = new RegExp(`${verb}[\\s\\S]{0,400}?${tbl}|${tbl}[\\s\\S]{0,400}?${verb}`)
+      expect(pg, `nothing exercises ${verb} on ${tbl}`).toMatch(claim)
+    }
+  })
+
+  it('covers the sweep, since retention is a promise and not a comment', () => {
+    expect(pg).toContain("interval '151 seconds'")
+    expect(pg).toContain('public.relay_sweep()')
+  })
+})
+
 describe('the migration can be applied', () => {
   it('is one file, applied by one command', () => {
     expect(migrations.length).toBeGreaterThan(0)

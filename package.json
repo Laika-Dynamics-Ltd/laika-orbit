@@ -12,6 +12,7 @@
     "typecheck": "for p in core cli mcp app; do npx tsc -p packages/$p/tsconfig.json --noEmit || exit 1; done",
     "test": "vitest run",
     "test:e2e": "node packages/app/test/e2e/run.mjs",
+    "test:db": "supabase test db",
     "lint": "biome check .",
     "format": "biome check --write .",
     "bench": "node bench/scoring.bench.mjs",
