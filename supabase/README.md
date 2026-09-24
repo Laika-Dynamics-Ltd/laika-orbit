@@ -6,7 +6,10 @@ the threat note, which is the part worth reading before changing anything here.
 
     supabase/migrations/20260924120000_relay.sql   the schema, the policies, the threat note
     supabase/tests/relay_rls.test.sql              the policies, proved with real queries
+    packages/app/relay-supabase.mjs                the transport's two calls, spoken to these tables
     packages/app/test/relay-schema.test.mjs        the schema, checked against the code it serves
+    packages/app/test/relay-table.mjs              a store that enforces the migration, parsed from it
+    packages/app/test/relay-integration.test.mjs   the relay run end to end through both
 
 ## Applying it
 
@@ -24,11 +27,43 @@ Two things it will use if they are there and shrug if they are not: `pg_cron` (f
 runs when a room has gone quiet) and the `supabase_realtime` publication (for `db.subscribe`).
 Both print a notice rather than failing the migration. Retention holds without either.
 
+## Wiring it up
+
+`createRelayDb` maps the transport's `send`/`subscribe` onto these tables and takes a supabase-js
+client it never makes itself, so importing it connects to nothing. When there is a project:
+
+    import { createClient } from '@supabase/supabase-js'
+    createRelayTransport({ handler, secret, db: createRelayDb(createClient(url, publishableKey)) })
+
+The client has to be signed in. Every row is stamped with `auth.uid()` by the table's default and
+every policy is one equality against it, so an anonymous client is refused at the door rather than
+allowed to write rows nobody can read.
+
 ## Running the tests
 
-The schema test runs anywhere, with no database:
+Two of the three run anywhere, with no database:
 
-    npx vitest run packages/app/test/relay-schema.test.mjs
+    npx vitest run packages/app/test/relay-schema.test.mjs       # the SQL against the code
+    npx vitest run packages/app/test/relay-integration.test.mjs  # the relay through the schema
+
+The second is the one worth understanding. It drives the real transport, the real sealed envelope
+and the real adapter against a store whose every rule — the room and nonce patterns, the
+directions, the sequence range, the ciphertext ceiling, the 150-second sweep, the 24-hour idle
+window — is parsed out of the migration at load rather than restated. So it is not a second guess
+at the schema: change the SQL and it changes with it, and it throws rather than enforcing
+yesterday's rules if it cannot find one.
+
+What that buys, without a Postgres: an envelope survives being taken apart into five columns and
+put back together; the table holds no chat title, repo name or token after a full round trip; a
+stream arrives as a run of separately sealed rows in sequence; another account subscribed to the
+same pipe is delivered nothing and can read nothing; a session-less client gets nothing at all; a
+message the Mac cannot open is counted and answered with silence; ciphertext is gone by the time it
+could no longer be opened, and the pipe still works afterwards; and a reply too big for a Realtime
+payload is fetched by id instead of dropped.
+
+What it does not buy: any evidence that a policy compiles, binds to the role you think, or is
+enforced by Postgres rather than by a JavaScript object that agrees with it. That is the next
+section, and it is still owed.
 
 The policy tests need a real Postgres, because a policy is not a claim you can check by reading:
 
