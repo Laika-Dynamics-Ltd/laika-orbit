@@ -4,6 +4,7 @@
  *   - /api/*                   → the real @laika/core engine over the real workspace
  * No separate API port, so fetch() is same-origin and nothing needs a proxy.
  */
+import './hide-windows.mjs'
 import { createServer as createHttp } from 'node:http'
 import { resolve, dirname, join, sep } from 'node:path'
 import { existsSync, createReadStream } from 'node:fs'
