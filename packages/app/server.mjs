@@ -24,7 +24,7 @@ import { handleVoice } from './voice.mjs'
 import { handleDrop, startDropZone } from './drop-api.mjs'
 import { handlePair } from './pair-api.mjs'
 import { readdir, readFile as fsRead, writeFile, mkdir, stat, realpath, rename, rm } from 'node:fs/promises'
-import { execFile, execFileSync } from 'node:child_process'
+import { execFile, execFileSync } from './hide-windows.mjs'
 import { promisify } from 'node:util'
 import { homedir } from 'node:os'
 import {

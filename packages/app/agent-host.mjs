@@ -29,10 +29,11 @@
  * address first, so something off the link cannot so much as time a guess at the token, then the
  * token, which is what it always was.
  */
+import './hide-windows.mjs'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { open as openFile } from 'node:fs/promises'
-import { execFile, execFileSync } from 'node:child_process'
+import { execFile, execFileSync } from './hide-windows.mjs'
 import { lanAddress, refuseRequest } from './local-net.mjs'
 import { createLanTransport } from './lan-transport.mjs'
 import { createSwitchboard } from './transport.mjs'

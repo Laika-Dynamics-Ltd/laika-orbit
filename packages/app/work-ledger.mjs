@@ -9,7 +9,7 @@
  * Nothing here runs on a timer. A ledger is read when a chat changes (the host calls touch), when
  * the cockpit connects, or when a conductor asks (fleet_list), and is trusted for FRESH_MS.
  */
-import { execFile } from 'node:child_process'
+import { execFile } from './hide-windows.mjs'
 import { stat } from 'node:fs/promises'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 
